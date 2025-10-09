@@ -53,7 +53,7 @@ fi
 echo "✓ VERL repository ready"
 
 # ==========================================
-# 5. Install VERL Dependencies
+# 4. Install VERL Dependencies
 # ==========================================
 echo "Step 5: Installing VERL dependencies (this may take a while)..."
 cd /workspace/verl
@@ -62,7 +62,7 @@ USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
 echo "✓ VERL dependencies installed"
 
 # ==========================================
-# 4. Install VERL in Editable Mode (no deps first)
+# 5. Install VERL in Editable Mode (no deps first)
 # ==========================================
 echo "Step 4: Installing VERL in editable mode (no deps)..."
 cd /workspace/verl
@@ -84,7 +84,7 @@ else
     git clone ${REPO_URL}
 fi
 
-echo "✓ Your repository ready"
+echo "✓ code repository cloned"
 
 # ==========================================
 # 7. Download GSM8K Dataset
@@ -93,10 +93,10 @@ echo "Step 7: Downloading GSM8K dataset..."
 cd /workspace/verl/examples/data_preprocess
 
 # Create data directory if it doesn't exist
-mkdir -p ~/data/gsm8k
+mkdir -p ~/../workspace/data/gsm8k
 
 # Run the preprocessing script
-python3 gsm8k.py --local_save_dir ~/data/gsm8k
+python3 gsm8k.py --local_save_dir ~/../workspace/data/gsm8k
 
 echo "✓ GSM8K dataset downloaded to ~/data/gsm8k"
 
@@ -120,8 +120,8 @@ echo "✓ W&B configured"
 echo "Step 9: Setting up your training script..."
 cd /workspace
 
-if [ -f "${REPO_NAME}/run_grpo_LoRA" ]; then
-    chmod +x ${REPO_NAME}/run_grpo_LoRA
+if [ -f "${REPO_NAME}/scripts/run_grpo_LoRA" ]; then
+    chmod +x ${REPO_NAME}/scripts/run_grpo_LoRA
     echo "✓ run_grpo_LoRA script is now executable"
 else
     echo "⚠ Warning: run_grpo_LoRA script not found in ${REPO_NAME}/"
