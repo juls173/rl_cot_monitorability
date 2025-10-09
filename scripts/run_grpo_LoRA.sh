@@ -19,10 +19,10 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export VLLM_USE_V1=0
 
 DATA_DIR=/workspace/data/gsm8k
-REWARD_FN_PATH=/workspace/rl_cot_monitorability/gsm8k_reward.py
+REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/gsm8k_reward.py
 REWARD_FN_NAME=compute_score
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
-PROJECT=verl_gsm8k_hotroll_debug
+PROJECT=verl_gsm8k_v2
 EXP=r1qwen15b_grpo_temp13_topp95
 
 python3 -m verl.trainer.main_ppo \
@@ -53,7 +53,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1\
   actor_rollout_ref.rollout.temperature=1.3 \
   actor_rollout_ref.rollout.top_p=0.95 \
-  actor_rollout_ref.rollout.n=4 \
+  actor_rollout_ref.rollout.n=5 \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.load_format="safetensors" \
