@@ -20,11 +20,15 @@ rm miniconda.sh
 
 # Source conda
 source /workspace/miniconda/etc/profile.d/conda.sh
+export PATH="/workspace/miniconda/bin:$PATH"
 
-# Accept conda license automatically
-conda config --system --prepend channels conda-forge
-conda config --system --set auto_update_conda false
-conda init bash
+# Accept conda ToS for default channels
+/workspace/miniconda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+/workspace/miniconda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
+# Configure conda
+/workspace/miniconda/bin/conda config --system --prepend channels conda-forge
+/workspace/miniconda/bin/conda config --system --set auto_update_conda false
 
 echo "✓ Conda installed successfully"
 
@@ -32,13 +36,16 @@ echo "✓ Conda installed successfully"
 # 2. Create Virtual Environment
 # ==========================================
 echo "Step 2: Creating conda environment..."
-conda create -n verl python=3.10 -y
-conda activate verl
+/workspace/miniconda/bin/conda create -n verl python=3.10 -y
 
-# Ensure conda hook is available for future sessions
-eval "$(/workspace/miniconda/bin/conda shell.bash hook)"
-echo 'source /workspace/miniconda/etc/profile.d/conda.sh' >> ~/.bashrc
-echo 'conda activate verl' >> ~/.bashrc
+# Initialize conda for bash
+/workspace/miniconda/bin/conda init bash
+
+# Source the bash profile to load conda functions
+source ~/.bashrc
+
+# Activate the environment
+conda activate verl
 
 echo "✓ Virtual environment 'verl' created and activated"
 
@@ -131,13 +138,13 @@ else
 fi
 
 # ==========================================
-# 10. Make the Script Executable
+# 10. Make Your Script Executable
 # ==========================================
 echo "Step 10: Setting up your training script..."
 cd /workspace
 
 if [ -f "${REPO_NAME}/scripts/run_grpo_LoRA" ]; then
-    chmod +x ${REPO_NAME}/scripts/run_grpo_LoRA
+    chmod +x ${REPO_NAME}/scripts/run_grpo_LoRA.sh
     echo "✓ run_grpo_LoRA script is now executable"
 else
     echo "⚠ Warning: run_grpo_LoRA script not found in ${REPO_NAME}/"
