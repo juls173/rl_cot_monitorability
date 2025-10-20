@@ -9,7 +9,29 @@ from vllm import LLM, SamplingParams
 from vllm.lora.request import LoRARequest
 from transformers import AutoTokenizer
 
-from gsm8k_reward_length import extract_answer
+def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "flexible") -> Optional[str]:
+    """Extract numerical answer from various formats."""
+    
+    # Method 1: Try LaTeX \boxed{} format (DeepSeek R1 style)
+    boxed_match = re.search(r'\\boxed\{([^}]+)\}', solution_str)
+    if boxed_match:
+        answer = boxed_match.group(1).strip()
+        answer = answer.replace(',', '').replace('$', '').strip()
+        return answer
+    
+    # Method 2: Try GSM8K #### format
+    gsm8k_match = re.search(r'####\s*(\-?[\d\.\,]+)', solution_str)
+    if gsm8k_match:
+        answer = gsm8k_match.group(1).replace(',', '').replace('$', '').strip()
+        return answer
+    
+    # Method 3: Flexible - find last number in text
+    if method == "flexible":
+        numbers = re.findall(r'\-?[\d\.\,]+', solution_str)
+        if numbers:
+            return numbers[-1].replace(',', '').strip()
+    
+    return None
 
 
 def compute_metrics(solution_str: str, ground_truth: str, budget: int, tokenizer) -> dict:
@@ -75,9 +97,8 @@ def save_jsonl(path: str, data: list):
 
 def eval_gsm8k_length(
     model: str,
-    parquet: str,
+    data: str,
     out: str,
-    tokenizer_name: str,
     do_sample: bool = False,
     temperature: float = 1.0,
     top_p: float = 0.95,
@@ -92,12 +113,12 @@ def eval_gsm8k_length(
     should point to the LoRA adapter directory.
     """
     # Load data
-    df = load_gsm8k_parquet(parquet)
+    df = load_gsm8k_parquet(data)
     if limit:
         df = df.head(limit)
     
     # Load tokenizer for length computation
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    tokenizer = AutoTokenizer.from_pretrained(model)
     
     # Prepare sampling params
     sp = SamplingParams(
@@ -180,9 +201,8 @@ def eval_gsm8k_length(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, help="Path to base model (or full model if not using LoRA)")
-    ap.add_argument("--parquet", required=True, help="Path to parquet dataset")
+    ap.add_argument("--data", required=True, help="Path to parquet dataset")
     ap.add_argument("--out", required=True, help="Output JSONL file")
-    ap.add_argument("--tokenizer-name", required=True, help="Tokenizer model name for length computation")
     ap.add_argument("--lora-path", default=None, help="Path to LoRA adapter directory (optional)")
     ap.add_argument("--do-sample", type=lambda s: s.lower() == "true", default=False)
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -195,9 +215,8 @@ if __name__ == "__main__":
     
     eval_gsm8k_length(
         model=args.model,
-        parquet=args.parquet,
+        data=args.data,
         out=args.out,
-        tokenizer_name=args.tokenizer_name,
         do_sample=args.do_sample,
         temperature=args.temperature,
         top_p=args.top_p,
