@@ -7,9 +7,9 @@ echo "=========================================="
 
 REPO_URL="https://github.com/juls173/rl_cot_monitorability.git" 
 REPO_BRANCH="baram"
-WANDB_API_KEY="b4ba58ff1bfb7204d21fc51e64228a46018693bc"
-NUM_BUDGET_COPIES=2
-BUDGET_VALUES="100 500"
+WANDB_API_KEY=""
+NUM_BUDGET_COPIES=1
+BUDGET_VALUES="200"
 
 # ==========================================
 # 1. Download and Install Conda

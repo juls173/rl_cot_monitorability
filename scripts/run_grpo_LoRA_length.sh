@@ -18,17 +18,17 @@ PY
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export VLLM_USE_V1=0
 
-NUM_BUDGET_COPIES=2
-LR=5e-4
+NUM_BUDGET_COPIES=1
+LR=1e-3
 LORA_RANK=32
 LORA_ALPHA=64
-EPOCHS=1
-DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}
+EPOCHS=4
+DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_200
 REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/gsm8k_reward_length.py
 REWARD_FN_NAME=compute_score
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 PROJECT=verl_gsm8k_length
-EXP="25_10_17_r1qwen15b_grpo_${NUM_BUDGET_COPIES}_copies_lr${LR}_alpha${LORA_ALPHA}_exp2"
+EXP="25_10_20_r1qwen15b_grpo_budget200_lr${LR}_alpha${LORA_ALPHA}_exp2"
 
 # 1x H100 80GB
 # TRAIN_BATCH_SIZE=256
@@ -94,7 +94,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.experiment_name=${EXP} \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=2 \
+  trainer.save_freq=4 \
   trainer.test_freq=2 \
   trainer.total_epochs=${EPOCHS}
 
