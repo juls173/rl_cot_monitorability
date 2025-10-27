@@ -25,21 +25,22 @@ def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "f
     return None
 
 def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_info: dict) -> float:
-    if "<\\think>" in solution_str:
-        output = solution_str.split("<\\think>")[-1]
-        predicted_answer = extract_answer(output, method="flexible")
-        if predicted_answer is None:
-            return 0.0
+    if "</think>" not in solution_str:
+        return 0.0
     
-        gt_clean = str(ground_truth).replace(',', '').strip()
-    
-        try:
-            # Try numeric comparison
-            pred_num = float(predicted_answer)
-            gt_num = float(gt_clean)
-            return 1.0 if abs(pred_num - gt_num) < 1e-6 else 0.0
-        except ValueError:
-            # Fallback to string comparison
-            return 1.0 if predicted_answer == gt_clean else 0.0
+    output = solution_str.split("</think>")[-1]
+    predicted_answer = extract_answer(output, method="flexible")
 
-    return 0.0
+    if predicted_answer is None:
+        return 0.0
+
+    gt_clean = str(ground_truth).replace(',', '').strip()
+
+    try:
+        # Try numeric comparison
+        pred_num = float(predicted_answer)
+        gt_num = float(gt_clean)
+        return 1.0 if abs(pred_num - gt_num) < 1e-6 else 0.0
+    except ValueError:
+        # Fallback to string comparison
+        return 1.0 if predicted_answer == gt_clean else 0.0
