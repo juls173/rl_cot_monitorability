@@ -8,8 +8,8 @@ echo "=========================================="
 REPO_URL="https://github.com/juls173/rl_cot_monitorability.git" 
 REPO_BRANCH="baram"
 WANDB_API_KEY="6dff329b191825f14c13f6a4600ec43b34a68baf"
-NUM_BUDGET_COPIES=1
-BUDGET_VALUES="200"
+NUM_BUDGET_COPIES=2
+BUDGET_VALUES="50,500"
 
 # ==========================================
 # 1. Download and Install Conda
@@ -101,7 +101,7 @@ cd /workspace/verl
 if pip show verl > /dev/null 2>&1; then
     echo "VERL already installed in editable mode, skipping..."
 else
-    pip install --no-deps -e .
+    /workspace/miniconda/envs/verl/bin/pip install --no-deps -e .
 fi
 
 echo "✓ VERL installed in editable mode"
@@ -137,7 +137,7 @@ if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
     echo "GSM8K dataset already exists, skipping download..."
 else
     # Run the preprocessing script
-    python3 /workspace/${REPO_NAME}/scripts/gsm8k_token_budget.py --local_save_dir ${DATA_DIR} --num_budget_copies ${NUM_BUDGET_COPIES} --budget_values ${BUDGET_VALUES}
+    /workspace/miniconda/envs/verl/bin/python /workspace/${REPO_NAME}/scripts/gsm8k_token_budget.py --local_save_dir ${DATA_DIR} --num_budget_copies ${NUM_BUDGET_COPIES} --budget_values ${BUDGET_VALUES}
 fi
 
 echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}"

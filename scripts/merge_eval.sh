@@ -72,8 +72,9 @@ python3 /workspace/rl_cot_monitorability/scripts/eval_gsm8k_length.py \
     --lora-path "${OUTPUT_DIR}/lora_adapter" \
     --data "${DATA_DIR}/test.parquet" \
     --out "${EVAL_OUTPUT}" \
-    --do-sample false \
-    --max-new-tokens 1536 \
+    --temperature 1.0 \
+    --max-new-tokens 1024 \
+    --max-model-len 2048 \
     --n-samples 1
 
 echo "Post-processing complete!"

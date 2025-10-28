@@ -9,6 +9,9 @@ from vllm import LLM, SamplingParams
 from vllm.lora.request import LoRARequest
 from transformers import AutoTokenizer
 
+# Export VLLM configuration
+os.environ["VLLM_USE_V1"] = "0"
+
 def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "flexible") -> Optional[str]:
     """Extract numerical answer from various formats."""
     
@@ -99,10 +102,10 @@ def eval_gsm8k_length(
     model: str,
     data: str,
     out: str,
-    do_sample: bool = False,
     temperature: float = 1.0,
     top_p: float = 0.95,
-    max_new_tokens: int = 1536,
+    max_new_tokens: int = 1024,
+    max_model_len: int = 2048,
     n_samples: int = 1,
     limit: Optional[int] = None,
     lora_path: Optional[str] = None,
@@ -122,22 +125,28 @@ def eval_gsm8k_length(
     
     # Prepare sampling params
     sp = SamplingParams(
-        temperature=float(temperature) if do_sample else 0.0,
-        top_p=float(top_p) if do_sample else 1.0,
-        max_tokens=int(max_new_tokens),
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_new_tokens,
         n=n_samples,
     )
     
     # Run inference
     if lora_path:
-        llm = LLM(model=model, enable_lora=True, max_lora_rank=32)
+        # # If using LoRA, ensure tokenizer files exist in LoRA directory
+        # tokenizer_config_path = os.path.join(lora_path, "tokenizer_config.json")
+        # if not os.path.exists(tokenizer_config_path):
+        #     print(f"Copying tokenizer files to {lora_path}...")
+        #     tokenizer.save_pretrained(lora_path)
+        
+        llm = LLM(model=model, enable_lora=True, max_lora_rank=32, max_model_len=max_model_len)
         lora_request = LoRARequest("adapter", 1, lora_path)
         prompts = df["prompt"].tolist()
         t0 = time.time()
         outputs = llm.generate(prompts, sp, lora_request=lora_request)
         dt = time.time() - t0
     else:
-        llm = LLM(model=model)
+        llm = LLM(model=model, max_model_len=max_model_len)
         prompts = df["prompt"].tolist()
         t0 = time.time()
         outputs = llm.generate(prompts, sp)
@@ -204,10 +213,10 @@ if __name__ == "__main__":
     ap.add_argument("--data", required=True, help="Path to parquet dataset")
     ap.add_argument("--out", required=True, help="Output JSONL file")
     ap.add_argument("--lora-path", default=None, help="Path to LoRA adapter directory (optional)")
-    ap.add_argument("--do-sample", type=lambda s: s.lower() == "true", default=False)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--top-p", type=float, default=0.95)
     ap.add_argument("--max-new-tokens", type=int, default=1024)
+    ap.add_argument("--max-model-len", type=int, default=2048)
     ap.add_argument("--n-samples", type=int, default=1)
     ap.add_argument("--limit", type=int, default=None)
     
@@ -217,10 +226,10 @@ if __name__ == "__main__":
         model=args.model,
         data=args.data,
         out=args.out,
-        do_sample=args.do_sample,
         temperature=args.temperature,
         top_p=args.top_p,
         max_new_tokens=args.max_new_tokens,
+        max_model_len=args.max_model_len,
         n_samples=args.n_samples,
         limit=args.limit,
         lora_path=args.lora_path,
