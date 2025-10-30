@@ -8,8 +8,8 @@ echo "=========================================="
 REPO_URL="https://github.com/juls173/rl_cot_monitorability.git" 
 REPO_BRANCH="baram"
 WANDB_API_KEY="6dff329b191825f14c13f6a4600ec43b34a68baf"
-NUM_BUDGET_COPIES=1
-BUDGET_VALUES="200"
+NUM_BUDGET_COPIES=2
+BUDGET_VALUES="50 500"
 
 # ==========================================
 # 1. Download and Install Conda
@@ -47,8 +47,6 @@ else
     conda create -n verl python=3.10 -y
 fi
 
-conda activate verl
-
 # Ensure conda hook is available for future sessions
 eval "$(/workspace/miniconda/bin/conda shell.bash hook)"
 
@@ -56,6 +54,14 @@ eval "$(/workspace/miniconda/bin/conda shell.bash hook)"
 if ! grep -q "conda activate verl" ~/.bashrc; then
     echo 'source /workspace/miniconda/etc/profile.d/conda.sh' >> ~/.bashrc
     echo 'conda activate verl' >> ~/.bashrc
+fi
+
+conda activate verl
+
+# Double-check that verl environment has been activated 
+if [ "$CONDA_DEFAULT_ENV" != "verl" ]; then
+    echo "Error: verl environment not activated; got ${CONDA_DEFAULT_ENV:-none}"
+    exit 1
 fi
 
 echo "✓ Virtual environment 'verl' created and activated"
@@ -78,7 +84,7 @@ echo "✓ VERL repository ready"
 # ==========================================
 # 4. Install VERL Dependencies
 # ==========================================
-echo "Step 5: Installing VERL dependencies (this may take a while)..."
+echo "Step 4: Installing VERL dependencies (this may take a while)..."
 cd /workspace/verl
 
 # Check if dependencies are already installed by looking for a marker file
@@ -94,7 +100,7 @@ echo "✓ VERL dependencies installed"
 # ==========================================
 # 5. Install VERL in Editable Mode (no deps first)
 # ==========================================
-echo "Step 4: Installing VERL in editable mode (no deps)..."
+echo "Step 5: Installing VERL in editable mode (no deps)..."
 cd /workspace/verl
 
 # Check if VERL is already installed
@@ -191,5 +197,7 @@ echo "To run your training script:"
 echo "  cd /workspace"
 echo "  ./${REPO_NAME}/scripts/run_grpo_LoRA_length"
 echo ""
-echo "Environment is already activated!"
+echo "⚠ Note: To activate the environment in your current shell, run:"
+echo "  source ~/.bashrc"
+echo "  # OR start a new terminal session"
 echo "=========================================="

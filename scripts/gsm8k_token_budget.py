@@ -70,7 +70,7 @@ if __name__ == "__main__":
     test_dataset = dataset["test"]
 
     instruction_following = 'Let\'s think step by step and output the final answer after "####".'
-    token_budget_str = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +100 or -100 tokens of the thinking budget.'
+    token_budget_str = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +50 or -50 tokens of the thinking budget.'
 
     # Extract base data first
     def make_base_map_fn(split):
