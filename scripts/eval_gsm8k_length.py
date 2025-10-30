@@ -141,6 +141,7 @@ def eval_gsm8k_length(
         dt = time.time() - t0
     else:
         llm = LLM(model=model, max_model_len=max_model_len)
+        llm = LLM(model=model, max_model_len=max_model_len)
         prompts = df["prompt"].tolist()
         t0 = time.time()
         outputs = llm.generate(prompts, sp)
@@ -211,6 +212,7 @@ if __name__ == "__main__":
     ap.add_argument("--top-p", type=float, default=0.95)
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--max-model-len", type=int, default=2048)
+    ap.add_argument("--max-model-len", type=int, default=2048)
     ap.add_argument("--n-samples", type=int, default=1)
     ap.add_argument("--limit", type=int, default=None)
     
@@ -223,6 +225,7 @@ if __name__ == "__main__":
         temperature=args.temperature,
         top_p=args.top_p,
         max_new_tokens=args.max_new_tokens,
+        max_model_len=args.max_model_len,
         max_model_len=args.max_model_len,
         n_samples=args.n_samples,
         limit=args.limit,
