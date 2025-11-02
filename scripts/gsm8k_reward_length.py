@@ -57,7 +57,6 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
     
     # Compute length reward
     # Reward is LENGTH_REWARD * min(1, (50 / |token_count - budget|)^LENGTH_EXPONENT)
-    # Reward is LENGTH_REWARD * min(1, (50 / |token_count - budget|)^LENGTH_EXPONENT)
     length_bonus = 0.0
     if 'budget' in extra_info:
         token_count = len(TOKENIZER.encode(solution_str))
@@ -68,10 +67,8 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
         else:
             difference = abs(token_count - budget)
             if difference <= 50:
-            if difference <= 50:
                 length_bonus = LENGTH_REWARD
             else:
-                length_bonus = LENGTH_REWARD * (50 / difference) ** LENGTH_EXPONENT
                 length_bonus = LENGTH_REWARD * (50 / difference) ** LENGTH_EXPONENT
     else:
         raise RuntimeError("Thinking budget not found in extra_info")

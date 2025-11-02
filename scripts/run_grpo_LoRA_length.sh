@@ -6,11 +6,9 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_USE_V1=0
 
 NUM_BUDGET_COPIES=2
-NUM_BUDGET_COPIES=2
 LR=5e-4
 LORA_RANK=32
 LORA_ALPHA=64
-EPOCHS=4
 EPOCHS=4
 DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}
 REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/gsm8k_reward_length.py
@@ -91,14 +89,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
   trainer.save_freq=4 \
-  trainer.save_freq=4 \
   trainer.test_freq=2 \
-  trainer.total_epochs=${EPOCHS} \
-  trainer.log_val_generations=15
-
-#  actor_rollout_ref.rollout.max_num_seqs=2560 \
-#  actor_rollout_ref.rollout.max_model_len=1536 \
-#  actor_rollout_ref.rollout.max_num_batched_tokens=65536 \
   trainer.total_epochs=${EPOCHS} \
   trainer.log_val_generations=15
 
