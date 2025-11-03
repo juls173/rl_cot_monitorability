@@ -66,6 +66,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \
   actor_rollout_ref.actor.clip_ratio=0.2 \
   actor_rollout_ref.actor.entropy_coeff=0 \
+  actor_rollout_ref.actor.strategy=fsdp2 \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.actor.fsdp_config.param_offload=False \
   actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
@@ -80,6 +81,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.layered_summon=True \
   actor_rollout_ref.ref.fsdp_config.param_offload=False \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE} \
+  actor_rollout_ref.ref.strategy=fsdp2 \
   custom_reward_function.path=${REWARD_FN_PATH} \
   custom_reward_function.name=${REWARD_FN_NAME} \
   trainer.critic_warmup=0 \
@@ -91,7 +93,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.save_freq=4 \
   trainer.test_freq=2 \
   trainer.total_epochs=${EPOCHS} \
-  trainer.log_val_generations=15
+  trainer.log_val_generations=15 \
 
 #  actor_rollout_ref.rollout.max_num_seqs=2560 \
 #  actor_rollout_ref.rollout.max_model_len=1536 \

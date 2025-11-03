@@ -3,11 +3,23 @@ import re
 from typing import Literal, Optional
 from transformers import AutoTokenizer
 
-# Load configuration from environment variables (once at module load)
-LENGTH_REWARD = float(os.environ["LENGTH_REWARD"])
-LENGTH_EXPONENT = float(os.environ["LENGTH_EXPONENT"])
-MODEL_NAME = os.environ["TOKENIZER_MODEL_NAME"]
-TOKENIZER = AutoTokenizer.from_pretrained(MODEL_NAME)
+# Global variables (lazy-loaded from environment if not passed as arguments)
+_LENGTH_REWARD = None
+_LENGTH_EXPONENT = None
+_MODEL_NAME = None
+_TOKENIZER = None
+
+def _load_from_env():
+    """Lazy-load configuration from environment variables."""
+    global _LENGTH_REWARD, _LENGTH_EXPONENT, _MODEL_NAME, _TOKENIZER
+    if _LENGTH_REWARD is None:
+        _LENGTH_REWARD = float(os.environ["LENGTH_REWARD"])
+    if _LENGTH_EXPONENT is None:
+        _LENGTH_EXPONENT = float(os.environ["LENGTH_EXPONENT"])
+    if _MODEL_NAME is None:
+        _MODEL_NAME = os.environ["TOKENIZER_MODEL_NAME"]
+    if _TOKENIZER is None:
+        _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_NAME)
 
 def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "flexible") -> Optional[str]:
     """Extract numerical answer from various formats."""
@@ -33,10 +45,47 @@ def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "f
     
     return None
 
-def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_info: dict) -> float:
+def compute_reward_breakdown(
+    solution_str: str,
+    ground_truth: str,
+    budget: int,
+    length_reward: Optional[float] = None,
+    length_exponent: Optional[float] = None,
+    tokenizer = None
+) -> dict:
+    """Compute detailed breakdown of correctness and length rewards.
+    
+    Args:
+        solution_str: The generated solution text
+        ground_truth: The correct answer
+        budget: Token budget for the solution
+        length_reward: Reward for length compliance (loads from env if None)
+        length_exponent: Exponent for length penalty (loads from env if None)
+        tokenizer: Tokenizer to use (loads from env if None)
+    
+    Returns:
+        Dictionary containing:
+            - extracted_answer: The extracted answer string (or None)
+            - correctness_reward: 1.0 if correct, 0.0 otherwise
+            - token_count: Number of tokens in solution
+            - length_diff: Absolute difference from budget
+            - length_bonus: Reward/penalty for length
+            - total_reward: Sum of correctness and length rewards
+    """
+    # Load from environment if not provided
+    if length_reward is None or length_exponent is None or tokenizer is None:
+        _load_from_env()
+        if length_reward is None:
+            length_reward = _LENGTH_REWARD
+        if length_exponent is None:
+            length_exponent = _LENGTH_EXPONENT
+        if tokenizer is None:
+            tokenizer = _TOKENIZER
+    
     # Compute correctness reward on the text after the end of the CoT
     if "</think>" not in solution_str:
         correctness_reward = 0.0
+        predicted_answer = None
     else:
         output = solution_str.split("</think>")[-1]
         predicted_answer = extract_answer(output, method="flexible")
@@ -55,22 +104,44 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
                 # Fallback to string comparison
                 correctness_reward = 1.0 if predicted_answer == gt_clean else 0.0
     
+    # Compute length metrics
+    token_count = len(tokenizer.encode(solution_str))
+    length_diff = abs(token_count - budget)
+    
     # Compute length reward
-    # Reward is LENGTH_REWARD * min(1, (50 / |token_count - budget|)^LENGTH_EXPONENT)
-    length_bonus = 0.0
-    if 'budget' in extra_info:
-        token_count = len(TOKENIZER.encode(solution_str))
-        budget = extra_info['budget']
-        if LENGTH_EXPONENT == float('inf'):
-            if abs(token_count - budget) <= 50:
-                length_bonus = LENGTH_REWARD
+    # Reward is length_reward * min(1, (50 / |token_count - budget|)^length_exponent)
+    if length_exponent == float('inf'):
+        if length_diff <= 50:
+            length_bonus = length_reward
         else:
-            difference = abs(token_count - budget)
-            if difference <= 50:
-                length_bonus = LENGTH_REWARD
-            else:
-                length_bonus = LENGTH_REWARD * (50 / difference) ** LENGTH_EXPONENT
+            length_bonus = 0.0
     else:
+        if length_diff <= 50:
+            length_bonus = length_reward
+        else:
+            length_bonus = length_reward * (50 / length_diff) ** length_exponent
+    
+    total_reward = correctness_reward + length_bonus
+    
+    return {
+        'extracted_answer': predicted_answer,
+        'correctness_reward': correctness_reward,
+        'token_count': token_count,
+        'length_diff': length_diff,
+        'length_bonus': length_bonus,
+        'total_reward': total_reward,
+    }
+
+
+def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_info: dict) -> float:
+    """Compute total reward score (for RL training).
+    
+    This is the main interface used during training. It loads configuration from
+    environment variables and returns just the total reward.
+    """
+    if 'budget' not in extra_info:
         raise RuntimeError("Thinking budget not found in extra_info")
     
-    return correctness_reward + length_bonus
+    budget = extra_info['budget']
+    result = compute_reward_breakdown(solution_str, ground_truth, budget)
+    return result['total_reward']
