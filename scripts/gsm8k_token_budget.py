@@ -69,7 +69,7 @@ if __name__ == "__main__":
     train_dataset = dataset["train"]
     test_dataset = dataset["test"]
 
-    instruction_following = 'Let\'s think step by step and output the final answer after "####".'
+    instruction_following = "Think step by step and output the final answer using \\boxed{}."
     token_budget_str = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +50 or -50 tokens of the thinking budget.'
 
     # Extract base data first
@@ -96,7 +96,7 @@ if __name__ == "__main__":
             
             for copy_idx, budget in enumerate(budgets):
                 question = (
-                    example["question_raw"] + " " + 
+                    example["question_raw"] + "\n\n" + 
                     token_budget_str.format(budget=budget) + " " + 
                     instruction_following
                 )
