@@ -4,6 +4,7 @@ import json
 import os
 from typing import Optional
 import pandas as pd
+import numpy as np
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from peft import PeftModelForCausalLM
@@ -190,12 +191,43 @@ def eval_gsm8k_length(
     both_acc = both_correct_count / n
     avg_reward = total_reward_sum / n
     
-    print(f"Evaluation Results:")
-    print(f"  N={n}")
-    print(f"  Correctness: {correct_count}/{n} = {acc:.4f}")
-    print(f"  Length Compliance: {length_compliant_count}/{n} = {length_acc:.4f}")
-    print(f"  Both Correct: {both_correct_count}/{n} = {both_acc:.4f}")
-    print(f"  Average Reward: {avg_reward:.4f}")
+    print(f"Overall Evaluation Results:")
+    print(f"- N={n}")
+    print(f"- Correctness: {correct_count}/{n} = {acc:.4f}")
+    print(f"- Length Compliance: {length_compliant_count}/{n} = {length_acc:.4f}")
+    print(f"- Both Correct: {both_correct_count}/{n} = {both_acc:.4f}")
+    print(f"- Average Reward: {avg_reward:.4f}")
+    print()
+    
+    # Compute per-budget statistics
+    results_df = pd.DataFrame(rows)
+    budget_stats = results_df.groupby('budget').agg({
+        'is_correct': ['sum', 'count', 'mean'],
+        'is_length_compliant': 'mean',
+        'is_both_ok': 'mean',
+        'total_reward': 'mean'
+    }).reset_index()
+    
+    # Flatten column names
+    budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 
+                            'length_compliance', 'both_correct', 'avg_reward']
+    budget_stats = budget_stats.sort_values('budget')
+    
+    print("Per-Budget Results:")
+    print("| Budget | N | Accuracy | Length Compliance | Both Correct | Avg Reward |")
+    print("|--------|---|----------|-------------------|--------------|------------|")
+    for _, row in budget_stats.iterrows():
+        print(f"| {int(row['budget'])} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
+              f"{row['length_compliance']:.4f} | {row['both_correct']:.4f} | {row['avg_reward']:.4f} |")
+    print()
+    
+    # Compute correlation between budget and accuracy
+    budgets = results_df['budget'].values
+    accuracies = results_df['is_correct'].astype(int).values
+    correlation = np.corrcoef(budgets, accuracies)[0, 1]
+    
+    print(f"Correlation between budget and accuracy: {correlation:.4f}")
+    print()
     
     # Save results
     save_jsonl(out, rows)
