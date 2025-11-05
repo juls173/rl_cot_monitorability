@@ -19,13 +19,13 @@ def load_gsm8k_parquet(path: str) -> pd.DataFrame:
     # Extract fields from nested structure
     rows = []
     for _, row in df.iterrows():
-        prompt_content = row['prompt'][0]['content']  # user message
+        prompt_messages = row['prompt']  # Keep full message list for chat template
         ground_truth = row['reward_model']['ground_truth']
         extra_info = row['extra_info']
         budget = extra_info['budget']
         
         rows.append({
-            'prompt': prompt_content,
+            'prompt': prompt_messages,
             'ground_truth': ground_truth,
             'budget': budget,
             'question': extra_info['question'],
@@ -100,8 +100,12 @@ def eval_gsm8k_length(
         device_map="auto",
     )
     
-    # Prepare prompts
-    prompts = df["prompt"].tolist()
+    # Prepare prompts - apply chat template to message lists
+    prompt_messages = df["prompt"].tolist()
+    prompts = [
+        tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        for messages in prompt_messages
+    ]
     
     # Run inference
     outputs = pipe(
@@ -137,7 +141,8 @@ def eval_gsm8k_length(
     for i, texts in enumerate(all_generated_texts):
         ground_truth = df.iloc[i]["ground_truth"]
         budget = int(df.iloc[i]["budget"])
-        prompt = df.iloc[i]["prompt"]
+        prompt_messages = df.iloc[i]["prompt"]
+        formatted_prompt = prompts[i]
         
         generated_text = texts[0]  # Pass@1 = first sample
         
@@ -164,7 +169,7 @@ def eval_gsm8k_length(
             "question": df.iloc[i]["question"],
             "budget": budget,
             "ground_truth": ground_truth,
-            "prompt": prompt,
+            "prompt": formatted_prompt,
             "generated_text": generated_text,
             "predicted_answer": metrics["extracted_answer"],
             "token_count": metrics["token_count"],
