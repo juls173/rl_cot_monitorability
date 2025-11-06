@@ -48,7 +48,7 @@ def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "f
 def compute_reward_breakdown(
     solution_str: str,
     ground_truth: str,
-    budget: int,
+    budget,  # Can be int or 'control'
     length_reward: Optional[float] = None,
     length_exponent: Optional[float] = None,
     tokenizer = None
@@ -58,7 +58,7 @@ def compute_reward_breakdown(
     Args:
         solution_str: The generated solution text
         ground_truth: The correct answer
-        budget: Token budget for the solution
+        budget: Token budget for the solution, or 'control' for no budget constraint
         length_reward: Reward for length compliance (loads from env if None)
         length_exponent: Exponent for length penalty (loads from env if None)
         tokenizer: Tokenizer to use (loads from env if None)
@@ -68,8 +68,8 @@ def compute_reward_breakdown(
             - extracted_answer: The extracted answer string (or None)
             - correctness_reward: 1.0 if correct, 0.0 otherwise
             - token_count: Number of tokens in solution
-            - length_diff: Absolute difference from budget
-            - length_bonus: Reward/penalty for length
+            - length_diff: Absolute difference from budget (None for control)
+            - length_bonus: Reward/penalty for length (0.0 for control)
             - total_reward: Sum of correctness and length rewards
     """
     # Load from environment if not provided
@@ -106,20 +106,26 @@ def compute_reward_breakdown(
     
     # Compute length metrics
     token_count = len(tokenizer.encode(solution_str))
-    length_diff = abs(token_count - budget)
     
-    # Compute length reward
-    # Reward is length_reward * min(1, (50 / |token_count - budget|)^length_exponent)
-    if length_exponent == float('inf'):
-        if length_diff <= 50:
-            length_bonus = length_reward
-        else:
-            length_bonus = 0.0
+    # Handle control condition (no budget constraint)
+    if budget == 'control':
+        length_diff = None
+        length_bonus = 0.0
     else:
-        if length_diff <= 50:
-            length_bonus = length_reward
+        length_diff = abs(token_count - budget)
+        
+        # Compute length reward
+        # Reward is length_reward * min(1, (50 / |token_count - budget|)^length_exponent)
+        if length_exponent == float('inf'):
+            if length_diff <= 50:
+                length_bonus = length_reward
+            else:
+                length_bonus = 0.0
         else:
-            length_bonus = length_reward * (50 / length_diff) ** length_exponent
+            if length_diff <= 50:
+                length_bonus = length_reward
+            else:
+                length_bonus = length_reward * (50 / length_diff) ** length_exponent
     
     total_reward = correctness_reward + length_bonus
     

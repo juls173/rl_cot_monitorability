@@ -141,7 +141,10 @@ def eval_gsm8k_length(
     
     for i, texts in enumerate(all_generated_texts):
         ground_truth = df.iloc[i]["ground_truth"]
-        budget = int(df.iloc[i]["budget"])
+        budget = df.iloc[i]["budget"]
+        # Convert budget to int only if it's not 'control'
+        if budget != 'control':
+            budget = int(budget)
         prompt_messages = df.iloc[i]["prompt"]
         formatted_prompt = prompts[i]
         
@@ -158,7 +161,8 @@ def eval_gsm8k_length(
         )
         
         is_correct = metrics["correctness_reward"] > 0.5  # Convert to boolean
-        is_length_ok = metrics["length_diff"] <= 50
+        # For control samples, length_diff is None, so they're always "compliant"
+        is_length_ok = metrics["length_diff"] is None or metrics["length_diff"] <= 50
         
         correct_count += int(is_correct)
         length_compliant_count += int(is_length_ok)
@@ -211,22 +215,30 @@ def eval_gsm8k_length(
     # Flatten column names
     budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 
                             'length_compliance', 'both_correct', 'avg_reward']
-    budget_stats = budget_stats.sort_values('budget')
+    # Sort by budget, putting 'control' at the end
+    budget_stats['sort_key'] = budget_stats['budget'].apply(
+        lambda x: float('inf') if x == 'control' else x
+    )
+    budget_stats = budget_stats.sort_values('sort_key').drop(columns=['sort_key'])
     
     print("Per-Budget Results:")
     print("| Budget | N | Accuracy | Length Compliance | Both Correct | Avg Reward |")
     print("|--------|---|----------|-------------------|--------------|------------|")
     for _, row in budget_stats.iterrows():
-        print(f"| {int(row['budget'])} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
+        budget_str = str(row['budget']) if row['budget'] == 'control' else str(int(row['budget']))
+        print(f"| {budget_str} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
               f"{row['length_compliance']:.4f} | {row['both_correct']:.4f} | {row['avg_reward']:.4f} |")
     print()
     
-    # Compute correlation between budget and accuracy
-    budgets = results_df['budget'].values
-    accuracies = results_df['is_correct'].astype(int).values
-    correlation = np.corrcoef(budgets, accuracies)[0, 1]
-    
-    print(f"Correlation between budget and accuracy: {correlation:.4f}")
+    # Compute correlation between budget and accuracy (excluding control samples)
+    non_control_df = results_df[results_df['budget'] != 'control']
+    if len(non_control_df) > 1:
+        budgets = non_control_df['budget'].values
+        accuracies = non_control_df['is_correct'].astype(int).values
+        correlation = np.corrcoef(budgets, accuracies)[0, 1]
+        print(f"Correlation between budget and accuracy (excluding control): {correlation:.4f}")
+    else:
+        print("Not enough non-control samples to compute correlation")
     print()
     
     # Save results
