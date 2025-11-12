@@ -90,7 +90,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.experiment_name=${EXP} \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=4 \
+  trainer.save_freq=8 \
   trainer.test_freq=2 \
   trainer.total_epochs=${EPOCHS} \
   trainer.log_val_generations=15 \
