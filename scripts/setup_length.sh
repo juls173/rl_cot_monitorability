@@ -8,8 +8,10 @@ echo "=========================================="
 REPO_URL="https://github.com/juls173/rl_cot_monitorability.git" 
 REPO_BRANCH="baram"
 WANDB_API_KEY="6dff329b191825f14c13f6a4600ec43b34a68baf"
+DATASET="gsm8k"  # Options: "gsm8k" or "bigmath"
 NUM_BUDGET_COPIES=1
 BUDGET_VALUES="control"
+BIGMATH_EXTRA_ARGS=""  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
 
 # ==========================================
 # 1. Download and Install Conda
@@ -129,24 +131,50 @@ fi
 echo "✓ code repository cloned"
 
 # ==========================================
-# 7. Download GSM8K Dataset
+# 7. Download Dataset
 # ==========================================
-echo "Step 7: Downloading GSM8K dataset..."
-cd /workspace/verl/examples/data_preprocess
+if [ "${DATASET}" = "gsm8k" ]; then
+    echo "Step 7: Downloading GSM8K dataset..."
+    cd /workspace/verl/examples/data_preprocess
 
-# Create data directory if it doesn't exist
-mkdir -p ~/../workspace/data/gsm8k
+    # Create data directory if it doesn't exist
+    mkdir -p ~/../workspace/data/gsm8k
 
-# Check if dataset already exists
-DATA_DIR=~/../workspace/data/gsm8k_${NUM_BUDGET_COPIES}
-if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
-    echo "GSM8K dataset already exists, skipping download..."
+    # Check if dataset already exists
+    BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
+    DATA_DIR=~/../workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}
+    if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
+        echo "GSM8K dataset already exists, skipping download..."
+    else
+        # Run the preprocessing script
+        python /workspace/${REPO_NAME}/scripts/gsm8k_token_budget.py --local_save_dir ${DATA_DIR} --num_budget_copies ${NUM_BUDGET_COPIES} --budget_values ${BUDGET_VALUES}
+    fi
+
+    echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+
+elif [ "${DATASET}" = "bigmath" ]; then
+    echo "Step 7: Downloading Big Math dataset..."
+    cd /workspace/verl/examples/data_preprocess
+
+    # Create data directory if it doesn't exist
+    mkdir -p ~/../workspace/data/bigmath
+
+    # Check if dataset already exists
+    BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
+    DATA_DIR=~/../workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}
+    if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
+        echo "Big Math dataset already exists, skipping download..."
+    else
+        # Run the preprocessing script
+        python /workspace/${REPO_NAME}/scripts/bigmath_token_budget.py --local-save-dir ${DATA_DIR} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values ${BUDGET_VALUES} ${BIGMATH_EXTRA_ARGS}
+    fi
+
+    echo "✓ Big Math dataset downloaded to ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+
 else
-    # Run the preprocessing script
-    python /workspace/${REPO_NAME}/scripts/gsm8k_token_budget.py --local_save_dir ${DATA_DIR} --num_budget_copies ${NUM_BUDGET_COPIES} --budget_values ${BUDGET_VALUES}
+    echo "Error: Unknown dataset '${DATASET}'. Valid options are 'gsm8k' or 'bigmath'."
+    exit 1
 fi
-
-echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}"
 
 # ==========================================
 # 8. Configure W&B Login
@@ -191,7 +219,12 @@ echo "=========================================="
 echo "Environment: verl"
 echo "VERL location: /workspace/verl"
 echo "Your repo location: /workspace/${REPO_NAME}"
-echo "Dataset location: ~/data/gsm8k_${NUM_BUDGET_COPIES}"
+BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
+if [ "${DATASET}" = "gsm8k" ]; then
+    echo "Dataset location: ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+elif [ "${DATASET}" = "bigmath" ]; then
+    echo "Dataset location: ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+fi
 echo ""
 echo "To run your training script:"
 echo "  cd /workspace"

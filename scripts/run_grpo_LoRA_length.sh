@@ -6,16 +6,18 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_USE_V1=0
 
 NUM_BUDGET_COPIES=1
+BUDGET_VALUES="control"
+BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 LR=5e-4
 LORA_RANK=32
 LORA_ALPHA=64
 EPOCHS=6
-DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}
-REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/gsm8k_reward_length.py
+DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}
+REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/reward_length.py
 REWARD_FN_NAME=compute_score
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 PROJECT=verl_gsm8k_length
-EXP="25_11_05_r1qwen15b_grpo_budget_control_lr${LR}_alpha${LORA_ALPHA}_exp2"
+EXP="25_11_05_r1qwen15b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_lr${LR}_alpha${LORA_ALPHA}_exp2"
 
 # 1x H100 80GB
 TRAIN_BATCH_SIZE=256
