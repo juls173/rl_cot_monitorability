@@ -42,8 +42,7 @@ N_GPUS=1
 
 
 # Export configuration for length-aware reward function
-export LENGTH_REWARD=1
-export LENGTH_EXPONENT=2
+export LENGTH_PENALTY=0.01
 export TOKENIZER_MODEL_NAME=${ACTOR}
 
 python3 -m verl.trainer.main_ppo \

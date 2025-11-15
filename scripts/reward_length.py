@@ -4,18 +4,15 @@ from typing import Literal, Optional
 from transformers import AutoTokenizer
 
 # Global variables (lazy-loaded from environment if not passed as arguments)
-_LENGTH_REWARD = None
-_LENGTH_EXPONENT = None
+_LENGTH_PENALTY = None
 _MODEL_NAME = None
 _TOKENIZER = None
 
 def _load_from_env():
     """Lazy-load configuration from environment variables."""
-    global _LENGTH_REWARD, _LENGTH_EXPONENT, _MODEL_NAME, _TOKENIZER
-    if _LENGTH_REWARD is None:
-        _LENGTH_REWARD = float(os.environ["LENGTH_REWARD"])
-    if _LENGTH_EXPONENT is None:
-        _LENGTH_EXPONENT = float(os.environ["LENGTH_EXPONENT"])
+    global _LENGTH_PENALTY, _MODEL_NAME, _TOKENIZER
+    if _LENGTH_PENALTY is None:
+        _LENGTH_PENALTY = float(os.environ["LENGTH_PENALTY"])
     if _MODEL_NAME is None:
         _MODEL_NAME = os.environ["TOKENIZER_MODEL_NAME"]
     if _TOKENIZER is None:
@@ -49,8 +46,7 @@ def compute_reward_breakdown(
     solution_str: str,
     ground_truth: str,
     budget,  # Can be int or 'control'
-    length_reward: Optional[float] = None,
-    length_exponent: Optional[float] = None,
+    length_penalty: Optional[float] = None,
     tokenizer = None
 ) -> dict:
     """Compute detailed breakdown of correctness and length rewards.
@@ -59,8 +55,7 @@ def compute_reward_breakdown(
         solution_str: The generated solution text
         ground_truth: The correct answer
         budget: Token budget for the solution, or 'control' for no budget constraint
-        length_reward: Reward for length compliance (loads from env if None)
-        length_exponent: Exponent for length penalty (loads from env if None)
+        length_penalty: Penalty per token of distance from budget (loads from env if None)
         tokenizer: Tokenizer to use (loads from env if None)
     
     Returns:
@@ -69,16 +64,14 @@ def compute_reward_breakdown(
             - correctness_reward: 1.0 if correct, 0.0 otherwise
             - token_count: Number of tokens in solution
             - length_diff: Absolute difference from budget (None for control)
-            - length_bonus: Reward/penalty for length (0.0 for control)
+            - length_penalty: Reward/penalty for length (0.0 for control)
             - total_reward: Sum of correctness and length rewards
     """
     # Load from environment if not provided
-    if length_reward is None or length_exponent is None or tokenizer is None:
+    if length_penalty is None or tokenizer is None:
         _load_from_env()
-        if length_reward is None:
-            length_reward = _LENGTH_REWARD
-        if length_exponent is None:
-            length_exponent = _LENGTH_EXPONENT
+        if length_penalty is None:
+            length_penalty = _LENGTH_PENALTY
         if tokenizer is None:
             tokenizer = _TOKENIZER
     
@@ -110,31 +103,19 @@ def compute_reward_breakdown(
     # Handle control condition (no budget constraint)
     if budget == 'control':
         length_diff = None
-        length_bonus = 0.0
+        reward_length_penalty = 0.0
     else:
         length_diff = abs(token_count - budget)
-        
-        # Compute length reward
-        # Reward is length_reward * min(1, (50 / |token_count - budget|)^length_exponent)
-        if length_exponent == float('inf'):
-            if length_diff <= 50:
-                length_bonus = length_reward
-            else:
-                length_bonus = 0.0
-        else:
-            if length_diff <= 50:
-                length_bonus = length_reward
-            else:
-                length_bonus = length_reward * (50 / length_diff) ** length_exponent
+        reward_length_penalty = -length_penalty * length_diff
     
-    total_reward = correctness_reward + length_bonus
+    total_reward = correctness_reward + reward_length_penalty
     
     return {
         'extracted_answer': predicted_answer,
         'correctness_reward': correctness_reward,
         'token_count': token_count,
         'length_diff': length_diff,
-        'length_bonus': length_bonus,
+        'length_penalty': reward_length_penalty,
         'total_reward': total_reward,
     }
 

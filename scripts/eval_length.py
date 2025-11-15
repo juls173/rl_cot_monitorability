@@ -11,7 +11,7 @@ from peft import PeftModelForCausalLM
 from tqdm import tqdm
 
 # Import reward computation functions
-from gsm8k_reward_length import compute_reward_breakdown
+from reward_length import compute_reward_breakdown
 
 
 def load_gsm8k_parquet(path: str) -> pd.DataFrame:
@@ -79,8 +79,7 @@ def eval_gsm8k_length(
     batch_size: int = 8,
     limit: Optional[int] = None,
     lora_path: Optional[str] = None,
-    length_reward: Optional[float] = None,
-    length_exponent: Optional[float] = None,
+    length_penalty: Optional[float] = None,
     forbidden_word: Optional[str] = None,
 ):
     """Run evaluation on GSM8K with length constraints.
@@ -88,8 +87,8 @@ def eval_gsm8k_length(
     If lora_path is provided, model should be the base model and lora_path
     should point to the LoRA adapter directory.
     
-    If length_reward/length_exponent are provided, they will be used for reward
-    computation; otherwise they are loaded from environment variables.
+    If length_penalty is provided, it will be used for reward computation;
+    otherwise it is loaded from environment variables.
     """
     # Load data
     df = load_gsm8k_parquet(data)
@@ -181,9 +180,9 @@ def eval_gsm8k_length(
     # Evaluate results
     rows = []
     correct_count = 0
-    length_compliant_count = 0
-    both_correct_count = 0
     total_reward_sum = 0.0
+    total_distance_sum = 0.0
+    distance_count = 0  # Count of non-control samples
     forbidden_word_violation_count = 0
     total_forbidden_word_count = 0
     
@@ -198,19 +197,21 @@ def eval_gsm8k_length(
         
         generated_text = texts[0]  # Pass@1 = first sample
         
-        # Use compute_reward_breakdown from gsm8k_reward_length.py
+        # Use compute_reward_breakdown from reward_length.py
         metrics = compute_reward_breakdown(
             generated_text, 
             ground_truth, 
             budget, 
-            length_reward=length_reward,
-            length_exponent=length_exponent,
+            length_penalty=length_penalty,
             tokenizer=tokenizer
         )
         
         is_correct = metrics["correctness_reward"] > 0.5  # Convert to boolean
-        # For control samples, length_diff is None, so they're always "compliant"
-        is_length_ok = metrics["length_diff"] is None or metrics["length_diff"] <= 50
+        
+        # Track distance from budget (for non-control samples)
+        if metrics["length_diff"] is not None:
+            total_distance_sum += abs(metrics["length_diff"])
+            distance_count += 1
         
         # Count forbidden word occurrences if specified
         forbidden_word_count = None
@@ -222,8 +223,6 @@ def eval_gsm8k_length(
             total_forbidden_word_count += forbidden_word_count
         
         correct_count += int(is_correct)
-        length_compliant_count += int(is_length_ok)
-        both_correct_count += int(is_correct and is_length_ok)
         total_reward_sum += metrics["total_reward"]
         
         rows.append({
@@ -237,11 +236,9 @@ def eval_gsm8k_length(
             "token_count": metrics["token_count"],
             "length_diff": metrics["length_diff"],
             "correctness_reward": metrics["correctness_reward"],
-            "length_bonus": metrics["length_bonus"],
+            "length_penalty": metrics["length_penalty"],
             "total_reward": metrics["total_reward"],
             "is_correct": is_correct,
-            "is_length_compliant": is_length_ok,
-            "is_both_ok": is_correct and is_length_ok,
             "forbidden_word": forbidden_word,
             "forbidden_word_count": forbidden_word_count,
             "has_forbidden_word_violation": has_forbidden_word_violation,
@@ -251,16 +248,35 @@ def eval_gsm8k_length(
     # Print summary statistics
     n = len(df)
     acc = correct_count / n
-    length_acc = length_compliant_count / n
-    both_acc = both_correct_count / n
     avg_reward = total_reward_sum / n
+    
+    # Compute overall distance metrics
+    results_df_temp = pd.DataFrame(rows)
+    non_null_df = results_df_temp[results_df_temp['length_diff'].notna()]
+    
+    avg_distance = None
+    avg_distance_correct = None
+    avg_distance_incorrect = None
+    
+    if len(non_null_df) > 0:
+        avg_distance = non_null_df['length_diff'].abs().mean()
+        
+        correct_df = non_null_df[non_null_df['is_correct'] == True]
+        incorrect_df = non_null_df[non_null_df['is_correct'] == False]
+        
+        avg_distance_correct = correct_df['length_diff'].abs().mean() if len(correct_df) > 0 else None
+        avg_distance_incorrect = incorrect_df['length_diff'].abs().mean() if len(incorrect_df) > 0 else None
     
     print(f"Overall Evaluation Results:")
     print(f"- N={n}")
     print(f"- Correctness: {correct_count}/{n} = {acc:.4f}")
-    print(f"- Length Compliance: {length_compliant_count}/{n} = {length_acc:.4f}")
-    print(f"- Both Correct: {both_correct_count}/{n} = {both_acc:.4f}")
     print(f"- Average Reward: {avg_reward:.4f}")
+    if avg_distance is not None:
+        print(f"- Average Distance from Budget: {avg_distance:.2f} tokens")
+        if avg_distance_correct is not None:
+            print(f"- Average Distance (Correct): {avg_distance_correct:.2f} tokens")
+        if avg_distance_incorrect is not None:
+            print(f"- Average Distance (Incorrect): {avg_distance_incorrect:.2f} tokens")
     if forbidden_word:
         violation_rate = forbidden_word_violation_count / n
         avg_forbidden_count = total_forbidden_word_count / n
@@ -274,8 +290,6 @@ def eval_gsm8k_length(
     if forbidden_word:
         budget_stats = results_df.groupby('budget').agg({
             'is_correct': ['sum', 'count', 'mean'],
-            'is_length_compliant': 'mean',
-            'is_both_ok': 'mean',
             'total_reward': 'mean',
             'has_forbidden_word_violation': 'mean',
             'forbidden_word_count': 'mean'
@@ -283,8 +297,31 @@ def eval_gsm8k_length(
         
         # Flatten column names
         budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 
-                                'length_compliance', 'both_correct', 'avg_reward',
-                                'violation_rate', 'avg_forbidden_count']
+                                'avg_reward', 'violation_rate', 'avg_forbidden_count']
+        
+        # Compute average distance metrics per budget
+        # For non-control samples, compute average distance and conditional distances
+        for budget in budget_stats['budget'].unique():
+            budget_df = results_df[results_df['budget'] == budget]
+            non_null_df = budget_df[budget_df['length_diff'].notna()]
+            
+            if len(non_null_df) > 0:
+                avg_dist = non_null_df['length_diff'].abs().mean()
+                
+                correct_df = non_null_df[non_null_df['is_correct'] == True]
+                incorrect_df = non_null_df[non_null_df['is_correct'] == False]
+                
+                avg_dist_correct = correct_df['length_diff'].abs().mean() if len(correct_df) > 0 else None
+                avg_dist_incorrect = incorrect_df['length_diff'].abs().mean() if len(incorrect_df) > 0 else None
+                
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance'] = avg_dist
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_correct'] = avg_dist_correct
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_incorrect'] = avg_dist_incorrect
+            else:
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance'] = None
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_correct'] = None
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_incorrect'] = None
+        
         # Sort by budget, putting 'control' at the end
         budget_stats['sort_key'] = budget_stats['budget'].apply(
             lambda x: float('inf') if x == 'control' else x
@@ -292,25 +329,49 @@ def eval_gsm8k_length(
         budget_stats = budget_stats.sort_values('sort_key').drop(columns=['sort_key'])
         
         print("Per-Budget Results:")
-        print("| Budget | N | Accuracy | Length Compliance | Both Correct | Avg Reward | Violation Rate | Avg Forbidden Count |")
-        print("|--------|---|----------|-------------------|--------------|------------|----------------|---------------------|")
+        print("| Budget | N | Accuracy | Avg Reward | Avg Distance | Avg Dist (Correct) | Avg Dist (Incorrect) | Violation Rate | Avg Forbidden Count |")
+        print("|--------|---|----------|------------|--------------|--------------------|-----------------------|----------------|---------------------|")
         for _, row in budget_stats.iterrows():
             budget_str = str(row['budget']) if row['budget'] == 'control' else str(int(row['budget']))
+            dist_str = f"{row['avg_distance']:.2f}" if pd.notna(row['avg_distance']) else "N/A"
+            dist_correct_str = f"{row['avg_distance_correct']:.2f}" if pd.notna(row['avg_distance_correct']) else "N/A"
+            dist_incorrect_str = f"{row['avg_distance_incorrect']:.2f}" if pd.notna(row['avg_distance_incorrect']) else "N/A"
             print(f"| {budget_str} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
-                  f"{row['length_compliance']:.4f} | {row['both_correct']:.4f} | {row['avg_reward']:.4f} | "
+                  f"{row['avg_reward']:.4f} | {dist_str} | {dist_correct_str} | {dist_incorrect_str} | "
                   f"{row['violation_rate']:.4f} | {row['avg_forbidden_count']:.4f} |")
         print()
     else:
         budget_stats = results_df.groupby('budget').agg({
             'is_correct': ['sum', 'count', 'mean'],
-            'is_length_compliant': 'mean',
-            'is_both_ok': 'mean',
             'total_reward': 'mean'
         }).reset_index()
         
         # Flatten column names
-        budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 
-                                'length_compliance', 'both_correct', 'avg_reward']
+        budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 'avg_reward']
+        
+        # Compute average distance metrics per budget
+        # For non-control samples, compute average distance and conditional distances
+        for budget in budget_stats['budget'].unique():
+            budget_df = results_df[results_df['budget'] == budget]
+            non_null_df = budget_df[budget_df['length_diff'].notna()]
+            
+            if len(non_null_df) > 0:
+                avg_dist = non_null_df['length_diff'].abs().mean()
+                
+                correct_df = non_null_df[non_null_df['is_correct'] == True]
+                incorrect_df = non_null_df[non_null_df['is_correct'] == False]
+                
+                avg_dist_correct = correct_df['length_diff'].abs().mean() if len(correct_df) > 0 else None
+                avg_dist_incorrect = incorrect_df['length_diff'].abs().mean() if len(incorrect_df) > 0 else None
+                
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance'] = avg_dist
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_correct'] = avg_dist_correct
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_incorrect'] = avg_dist_incorrect
+            else:
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance'] = None
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_correct'] = None
+                budget_stats.loc[budget_stats['budget'] == budget, 'avg_distance_incorrect'] = None
+        
         # Sort by budget, putting 'control' at the end
         budget_stats['sort_key'] = budget_stats['budget'].apply(
             lambda x: float('inf') if x == 'control' else x
@@ -318,12 +379,15 @@ def eval_gsm8k_length(
         budget_stats = budget_stats.sort_values('sort_key').drop(columns=['sort_key'])
         
         print("Per-Budget Results:")
-        print("| Budget | N | Accuracy | Length Compliance | Both Correct | Avg Reward |")
-        print("|--------|---|----------|-------------------|--------------|------------|")
+        print("| Budget | N | Accuracy | Avg Reward | Avg Distance | Avg Dist (Correct) | Avg Dist (Incorrect) |")
+        print("|--------|---|----------|------------|--------------|--------------------|-----------------------|")
         for _, row in budget_stats.iterrows():
             budget_str = str(row['budget']) if row['budget'] == 'control' else str(int(row['budget']))
+            dist_str = f"{row['avg_distance']:.2f}" if pd.notna(row['avg_distance']) else "N/A"
+            dist_correct_str = f"{row['avg_distance_correct']:.2f}" if pd.notna(row['avg_distance_correct']) else "N/A"
+            dist_incorrect_str = f"{row['avg_distance_incorrect']:.2f}" if pd.notna(row['avg_distance_incorrect']) else "N/A"
             print(f"| {budget_str} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
-                  f"{row['length_compliance']:.4f} | {row['both_correct']:.4f} | {row['avg_reward']:.4f} |")
+                  f"{row['avg_reward']:.4f} | {dist_str} | {dist_correct_str} | {dist_incorrect_str} |")
         print()
     
     # Compute correlation between budget and accuracy (excluding control samples)
@@ -355,10 +419,8 @@ if __name__ == "__main__":
     ap.add_argument("--n-samples", type=int, default=1)
     ap.add_argument("--batch-size", type=int, default=8, help="Batch size for inference")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--length-reward", type=float, default=None, 
-                    help="Reward for length compliance (loads from env if not provided)")
-    ap.add_argument("--length-exponent", type=float, default=None,
-                    help="Exponent for length penalty (loads from env if not provided)")
+    ap.add_argument("--length-penalty", type=float, default=None, 
+                    help="Penalty per token of distance from budget (loads from env if not provided)")
     ap.add_argument("--forbidden-word", type=str, default=None,
                     help="Word to forbid in the model's private reasoning")
     
@@ -376,8 +438,7 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         limit=args.limit,
         lora_path=args.lora_path,
-        length_reward=args.length_reward,
-        length_exponent=args.length_exponent,
+        length_penalty=args.length_penalty,
         forbidden_word=args.forbidden_word,
     )
 

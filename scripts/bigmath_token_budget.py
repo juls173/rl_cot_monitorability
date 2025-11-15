@@ -10,7 +10,7 @@ import datasets
 
 
 INSTRUCTION_FOLLOWING = "Think step by step and output the final answer using \\boxed{}."
-TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +50 or -50 tokens of the thinking budget.'
+TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process as close as possible to the thinking budget.'
 
 
 def is_numerical(answer: str) -> bool:
