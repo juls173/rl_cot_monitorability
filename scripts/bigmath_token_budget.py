@@ -10,6 +10,7 @@ import datasets
 
 
 INSTRUCTION_FOLLOWING = "Think step by step and output the final answer using \\boxed{}."
+INSTRUCTION_FOLLOWING_FORMAT_ONLY = "Think step by step and output ONLY the final answer using \\boxed{}. Do not provide any other explanation."
 TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process as close as possible to the thinking budget.'
 
 
@@ -44,9 +45,11 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source):
+def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False):
     """Create multiple copies of each example with different token budgets."""
     expanded = []
+    
+    instruction = INSTRUCTION_FOLLOWING_FORMAT_ONLY if format_only_answer else INSTRUCTION_FOLLOWING
     
     for example in dataset:
         budgets = random.sample(budget_values, num_copies)
@@ -54,12 +57,12 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source):
         for copy_idx, budget in enumerate(budgets):
             # Handle control condition (no budget constraint)
             if budget == 'control':
-                question = example["problem"] + "\n\n" + INSTRUCTION_FOLLOWING
+                question = example["problem"] + "\n\n" + instruction
             else:
                 question = (
                     example["problem"] + "\n\n" + 
                     TOKEN_BUDGET_STR.format(budget=budget) + " " + 
-                    INSTRUCTION_FOLLOWING
+                    instruction
                 )
             
             data = {
@@ -80,6 +83,7 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source):
                     "llama8b_solve_rate": example["llama8b_solve_rate"],
                     "budget": budget,
                     "copy_idx": copy_idx,
+                    "format_only_answer": format_only_answer,
                 },
             }
             expanded.append(data)
@@ -97,6 +101,7 @@ def bigmath_token_budget(
     solve_rate_max=1.0,
     train_fraction=0.8,
     numerical_only=False,
+    format_only_answer=False,
     seed=42
 ):
     """
@@ -112,6 +117,7 @@ def bigmath_token_budget(
         solve_rate_max: Maximum llama8b_solve_rate
         train_fraction: Fraction of data to use for training
         numerical_only: If True, only include problems with numerical answers
+        format_only_answer: If True, instruct model to output only boxed answer with no explanation
         seed: Random seed for reproducibility
     """
     random.seed(seed)
@@ -127,7 +133,7 @@ def bigmath_token_budget(
     
     # Filter by solve rate range
     dataset = dataset.filter(
-        lambda x: solve_rate_min <= x["llama8b_solve_rate"] <= solve_rate_max
+        lambda x: x["llama8b_solve_rate"] is not None and solve_rate_min <= x["llama8b_solve_rate"] <= solve_rate_max
     )
     
     # Filter for numerical answers if requested
@@ -155,8 +161,8 @@ def bigmath_token_budget(
     test_dataset = test_dataset.map(lambda x: {"split": "test"})
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source)
-    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source)
+    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source, format_only_answer)
+    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source, format_only_answer)
     
     # Save to parquet
     os.makedirs(local_save_dir, exist_ok=True)
@@ -222,6 +228,11 @@ if __name__ == "__main__":
         help="Only include problems with numerical answers"
     )
     parser.add_argument(
+        "--format-only-answer",
+        action="store_true",
+        help="Instruct model to output only boxed answer with no explanation"
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -254,6 +265,7 @@ if __name__ == "__main__":
         solve_rate_max=args.solve_rate_max,
         train_fraction=args.train_fraction,
         numerical_only=args.numerical_only,
+        format_only_answer=args.format_only_answer,
         seed=args.seed
     )
 

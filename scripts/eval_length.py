@@ -1,7 +1,5 @@
 import argparse
-import time
 import json
-import os
 from typing import Optional
 import pandas as pd
 import numpy as np
@@ -32,6 +30,7 @@ def load_gsm8k_parquet(path: str) -> pd.DataFrame:
             'budget': budget,
             'question': extra_info['question'],
             'answer': extra_info['answer'],
+            'format_only_answer': extra_info.get('format_only_answer', False),
         })
     
     return pd.DataFrame(rows)
@@ -149,7 +148,7 @@ def eval_gsm8k_length(
         for messages in prompt_messages
     ]
     
-    # Run inference with progress bar
+    # Run inference
     outputs = list(tqdm(
         pipe(
             (x for x in prompts),
@@ -162,7 +161,7 @@ def eval_gsm8k_length(
             return_full_text=False,
             batch_size=batch_size,
         ),
-        total=len(prompt_messages),
+        total=len(prompts),
         desc="Generating responses"
     ))
     
@@ -183,6 +182,7 @@ def eval_gsm8k_length(
     total_reward_sum = 0.0
     total_distance_sum = 0.0
     distance_count = 0  # Count of non-control samples
+    total_format_penalty_sum = 0.0
     forbidden_word_violation_count = 0
     total_forbidden_word_count = 0
     
@@ -224,12 +224,14 @@ def eval_gsm8k_length(
         
         correct_count += int(is_correct)
         total_reward_sum += metrics["total_reward"]
+        total_format_penalty_sum += metrics["format_penalty"]
         
         rows.append({
             "idx": i,
             "question": df.iloc[i]["question"],
             "budget": budget,
             "ground_truth": ground_truth,
+            "format_only_answer": df.iloc[i]["format_only_answer"],
             "prompt": formatted_prompt,
             "generated_text": generated_text,
             "predicted_answer": metrics["extracted_answer"],
@@ -237,6 +239,7 @@ def eval_gsm8k_length(
             "length_diff": metrics["length_diff"],
             "correctness_reward": metrics["correctness_reward"],
             "length_penalty": metrics["length_penalty"],
+            "format_penalty": metrics["format_penalty"],
             "total_reward": metrics["total_reward"],
             "is_correct": is_correct,
             "forbidden_word": forbidden_word,
@@ -249,6 +252,7 @@ def eval_gsm8k_length(
     n = len(df)
     acc = correct_count / n
     avg_reward = total_reward_sum / n
+    avg_format_penalty = total_format_penalty_sum / n
     
     # Compute overall distance metrics
     results_df_temp = pd.DataFrame(rows)
@@ -271,6 +275,7 @@ def eval_gsm8k_length(
     print(f"- N={n}")
     print(f"- Correctness: {correct_count}/{n} = {acc:.4f}")
     print(f"- Average Reward: {avg_reward:.4f}")
+    print(f"- Average Format Penalty: {avg_format_penalty:.4f}")
     if avg_distance is not None:
         print(f"- Average Distance from Budget: {avg_distance:.2f} tokens")
         if avg_distance_correct is not None:
@@ -291,13 +296,14 @@ def eval_gsm8k_length(
         budget_stats = results_df.groupby('budget').agg({
             'is_correct': ['sum', 'count', 'mean'],
             'total_reward': 'mean',
+            'format_penalty': 'mean',
             'has_forbidden_word_violation': 'mean',
             'forbidden_word_count': 'mean'
         }).reset_index()
         
         # Flatten column names
         budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 
-                                'avg_reward', 'violation_rate', 'avg_forbidden_count']
+                                'avg_reward', 'avg_format_penalty', 'violation_rate', 'avg_forbidden_count']
         
         # Compute average distance metrics per budget
         # For non-control samples, compute average distance and conditional distances
@@ -329,25 +335,26 @@ def eval_gsm8k_length(
         budget_stats = budget_stats.sort_values('sort_key').drop(columns=['sort_key'])
         
         print("Per-Budget Results:")
-        print("| Budget | N | Accuracy | Avg Reward | Avg Distance | Avg Dist (Correct) | Avg Dist (Incorrect) | Violation Rate | Avg Forbidden Count |")
-        print("|--------|---|----------|------------|--------------|--------------------|-----------------------|----------------|---------------------|")
+        print("| Budget | N | Accuracy | Avg Reward | Avg Format Penalty | Avg Distance | Avg Dist (Correct) | Avg Dist (Incorrect) | Violation Rate | Avg Forbidden Count |")
+        print("|--------|---|----------|------------|--------------------|--------------|--------------------|----------------------|----------------|---------------------|")
         for _, row in budget_stats.iterrows():
             budget_str = str(row['budget']) if row['budget'] == 'control' else str(int(row['budget']))
             dist_str = f"{row['avg_distance']:.2f}" if pd.notna(row['avg_distance']) else "N/A"
             dist_correct_str = f"{row['avg_distance_correct']:.2f}" if pd.notna(row['avg_distance_correct']) else "N/A"
             dist_incorrect_str = f"{row['avg_distance_incorrect']:.2f}" if pd.notna(row['avg_distance_incorrect']) else "N/A"
             print(f"| {budget_str} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
-                  f"{row['avg_reward']:.4f} | {dist_str} | {dist_correct_str} | {dist_incorrect_str} | "
+                  f"{row['avg_reward']:.4f} | {row['avg_format_penalty']:.4f} | {dist_str} | {dist_correct_str} | {dist_incorrect_str} | "
                   f"{row['violation_rate']:.4f} | {row['avg_forbidden_count']:.4f} |")
         print()
     else:
         budget_stats = results_df.groupby('budget').agg({
             'is_correct': ['sum', 'count', 'mean'],
-            'total_reward': 'mean'
+            'total_reward': 'mean',
+            'format_penalty': 'mean'
         }).reset_index()
         
         # Flatten column names
-        budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 'avg_reward']
+        budget_stats.columns = ['budget', 'correct_count', 'total_count', 'accuracy', 'avg_reward', 'avg_format_penalty']
         
         # Compute average distance metrics per budget
         # For non-control samples, compute average distance and conditional distances
@@ -379,15 +386,15 @@ def eval_gsm8k_length(
         budget_stats = budget_stats.sort_values('sort_key').drop(columns=['sort_key'])
         
         print("Per-Budget Results:")
-        print("| Budget | N | Accuracy | Avg Reward | Avg Distance | Avg Dist (Correct) | Avg Dist (Incorrect) |")
-        print("|--------|---|----------|------------|--------------|--------------------|-----------------------|")
+        print("| Budget | N | Accuracy | Avg Reward | Avg Format Penalty | Avg Distance | Avg Dist (Correct) | Avg Dist (Incorrect) |")
+        print("|--------|---|----------|------------|--------------------|--------------|--------------------|----------------------|")
         for _, row in budget_stats.iterrows():
             budget_str = str(row['budget']) if row['budget'] == 'control' else str(int(row['budget']))
             dist_str = f"{row['avg_distance']:.2f}" if pd.notna(row['avg_distance']) else "N/A"
             dist_correct_str = f"{row['avg_distance_correct']:.2f}" if pd.notna(row['avg_distance_correct']) else "N/A"
             dist_incorrect_str = f"{row['avg_distance_incorrect']:.2f}" if pd.notna(row['avg_distance_incorrect']) else "N/A"
             print(f"| {budget_str} | {int(row['total_count'])} | {row['accuracy']:.4f} | "
-                  f"{row['avg_reward']:.4f} | {dist_str} | {dist_correct_str} | {dist_incorrect_str} |")
+                  f"{row['avg_reward']:.4f} | {row['avg_format_penalty']:.4f} | {dist_str} | {dist_correct_str} | {dist_incorrect_str} |")
         print()
     
     # Compute correlation between budget and accuracy (excluding control samples)

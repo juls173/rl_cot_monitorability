@@ -11,6 +11,7 @@ import datasets
 
 
 INSTRUCTION_FOLLOWING = "Think step by step and output the final answer using \\boxed{}."
+INSTRUCTION_FOLLOWING_FORMAT_ONLY = "Think step by step and output ONLY the final answer using \\boxed{}. Do not provide any other explanation."
 TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process as close as possible to the thinking budget.'
 
 
@@ -37,9 +38,11 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source):
+def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False):
     """Create multiple copies of each example with different token budgets."""
     expanded = []
+    
+    instruction = INSTRUCTION_FOLLOWING_FORMAT_ONLY if format_only_answer else INSTRUCTION_FOLLOWING
     
     for example in dataset:
         budgets = random.sample(budget_values, num_copies)
@@ -47,12 +50,12 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source):
         for copy_idx, budget in enumerate(budgets):
             # Handle control condition (no budget constraint)
             if budget == 'control':
-                question = example["question_raw"] + "\n\n" + INSTRUCTION_FOLLOWING
+                question = example["question_raw"] + "\n\n" + instruction
             else:
                 question = (
                     example["question_raw"] + "\n\n" + 
                     TOKEN_BUDGET_STR.format(budget=budget) + " " + 
-                    INSTRUCTION_FOLLOWING
+                    instruction
                 )
             
             data = {
@@ -70,6 +73,7 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source):
                     "question": example["question_raw"],
                     "budget": budget,
                     "copy_idx": copy_idx,
+                    "format_only_answer": format_only_answer,
                 },
             }
             expanded.append(data)
@@ -91,6 +95,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--budget_values", nargs='+', default=[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
         help="Possible token budget values to sample from. Can include 'control' for no budget constraint."
+    )
+    parser.add_argument(
+        "--format_only_answer",
+        action="store_true",
+        help="Instruct model to output only boxed answer with no explanation"
     )
 
     args = parser.parse_args()
@@ -127,8 +136,8 @@ if __name__ == "__main__":
     test_dataset = test_dataset.map(function=make_base_map_fn("test"), with_indices=True)
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_copies, budget_values, data_source)
-    test_dataset = expand_with_budgets(test_dataset, num_copies, budget_values, data_source)
+    train_dataset = expand_with_budgets(train_dataset, num_copies, budget_values, data_source, args.format_only_answer)
+    test_dataset = expand_with_budgets(test_dataset, num_copies, budget_values, data_source, args.format_only_answer)
 
     hdfs_dir = args.hdfs_dir
     local_save_dir = args.local_dir

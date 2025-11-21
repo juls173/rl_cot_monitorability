@@ -386,6 +386,34 @@ def eval_readability_length(
                   f"{stats['min']:.0f} | {stats['max']:.0f} |")
     print()
     
+    # By format_only_answer (if present)
+    if 'format_only_answer' in df.columns:
+        print("="*60)
+        print("READABILITY BY FORMAT ONLY ANSWER")
+        print("="*60)
+        format_groups = df.groupby('format_only_answer')['readability_score'].apply(list).to_dict()
+        
+        print("| Format Only | N | Mean | Std | Median | Min | Max |")
+        print("|-------------|---|------|-----|--------|-----|-----|")
+        
+        format_stats_list = []
+        for format_only in [False, True]:
+            if format_only in format_groups:
+                scores = format_groups[format_only]
+                stats = compute_stats(scores)
+                format_stats_list.append({
+                    'format_only_answer': format_only,
+                    **stats
+                })
+                
+                label = "Format Only" if format_only else "Normal"
+                print(f"| {label} | {stats['count']} | {stats['mean']:.2f} | "
+                      f"{stats['std']:.2f} | {stats['median']:.2f} | "
+                      f"{stats['min']:.0f} | {stats['max']:.0f} |")
+        print()
+    else:
+        format_stats_list = []
+    
     # Combined: by budget and correctness
     print("="*60)
     print("READABILITY BY BUDGET AND CORRECTNESS")
@@ -419,6 +447,7 @@ def eval_readability_length(
         'overall_stats': overall_stats,
         'budget_stats': budget_stats_list,
         'correctness_stats': correctness_stats_list,
+        'format_stats': format_stats_list,
         'combined_stats': combined_stats_list,
         'detailed_results': data
     }

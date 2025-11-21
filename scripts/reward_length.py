@@ -7,16 +7,19 @@ from transformers import AutoTokenizer
 _LENGTH_PENALTY = None
 _MODEL_NAME = None
 _TOKENIZER = None
+_FORMAT_PENALTY = None
 
 def _load_from_env():
     """Lazy-load configuration from environment variables."""
-    global _LENGTH_PENALTY, _MODEL_NAME, _TOKENIZER
+    global _LENGTH_PENALTY, _MODEL_NAME, _TOKENIZER, _FORMAT_PENALTY
     if _LENGTH_PENALTY is None:
         _LENGTH_PENALTY = float(os.environ["LENGTH_PENALTY"])
     if _MODEL_NAME is None:
         _MODEL_NAME = os.environ["TOKENIZER_MODEL_NAME"]
     if _TOKENIZER is None:
         _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_NAME)
+    if _FORMAT_PENALTY is None:
+        _FORMAT_PENALTY = float(os.environ.get("FORMAT_ONLY_ANSWER_PENALTY", 0.0))
 
 def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "flexible") -> Optional[str]:
     """Extract numerical answer from various formats."""
@@ -47,6 +50,7 @@ def compute_reward_breakdown(
     ground_truth: str,
     budget,  # Can be int or 'control'
     length_penalty: Optional[float] = None,
+    format_penalty: Optional[float] = None,
     tokenizer = None
 ) -> dict:
     """Compute detailed breakdown of correctness and length rewards.
@@ -56,6 +60,7 @@ def compute_reward_breakdown(
         ground_truth: The correct answer
         budget: Token budget for the solution, or 'control' for no budget constraint
         length_penalty: Penalty per token of distance from budget (loads from env if None)
+        format_penalty: Penalty for incorrect format (loads from env if None)
         tokenizer: Tokenizer to use (loads from env if None)
     
     Returns:
@@ -65,15 +70,18 @@ def compute_reward_breakdown(
             - token_count: Number of tokens in solution
             - length_diff: Absolute difference from budget (None for control)
             - length_penalty: Reward/penalty for length (0.0 for control)
-            - total_reward: Sum of correctness and length rewards
+            - format_penalty: Reward/penalty for format (0.0 if correct or not used)
+            - total_reward: Sum of correctness, length, and format rewards
     """
     # Load from environment if not provided
-    if length_penalty is None or tokenizer is None:
+    if length_penalty is None or tokenizer is None or format_penalty is None:
         _load_from_env()
         if length_penalty is None:
             length_penalty = _LENGTH_PENALTY
         if tokenizer is None:
             tokenizer = _TOKENIZER
+        if format_penalty is None:
+            format_penalty = _FORMAT_PENALTY
     
     # Compute correctness reward on the text after the end of the CoT
     if "</think>" not in solution_str:
@@ -107,8 +115,24 @@ def compute_reward_breakdown(
     else:
         length_diff = abs(token_count - budget)
         reward_length_penalty = -length_penalty * length_diff
+
+    # Compute format penalty
+    if format_penalty > 0.0:
+        if "</think>" in solution_str:
+            response = solution_str.split("</think>")[-1]
+        else:
+            # If no thinking block, the whole string is the response
+            response = solution_str
+            
+        # Check if response matches \boxed{...} with only whitespace around
+        if re.fullmatch(r'\s*\\boxed\{[^}]+\}\s*', response, flags=re.DOTALL):
+            reward_format_penalty = 0.0
+        else:
+            reward_format_penalty = -format_penalty
+    else:
+        reward_format_penalty = 0.0
     
-    total_reward = correctness_reward + reward_length_penalty
+    total_reward = correctness_reward + reward_length_penalty + reward_format_penalty
     
     return {
         'extracted_answer': predicted_answer,
@@ -116,6 +140,7 @@ def compute_reward_breakdown(
         'token_count': token_count,
         'length_diff': length_diff,
         'length_penalty': reward_length_penalty,
+        'format_penalty': reward_format_penalty,
         'total_reward': total_reward,
     }
 

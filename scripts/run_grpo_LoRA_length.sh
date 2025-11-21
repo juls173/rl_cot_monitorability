@@ -6,44 +6,53 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_USE_V1=0
 
 NUM_BUDGET_COPIES=1
-BUDGET_VALUES="control"
+BUDGET_VALUES="10 500"
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
+FORMAT_ONLY_ANSWER=false
+if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
+    FORMAT_STRING="_format"
+else
+    FORMAT_STRING=""
+fi
 LR=5e-4
 LORA_RANK=32
 LORA_ALPHA=64
-EPOCHS=6
-DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}
+EPOCHS=1
+# DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format
+DATA_DIR=/workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}${FORMAT_STRING}
 REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/reward_length.py
 REWARD_FN_NAME=compute_score
-ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
-PROJECT=verl_gsm8k_length
-EXP="25_11_05_r1qwen15b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_lr${LR}_alpha${LORA_ALPHA}_exp2"
+# ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+# PROJECT=verl_gsm8k_length
+PROJECT=verl_bigmath_length
+EXP="25_11_17_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
 
-# 1x H100 80GB
-TRAIN_BATCH_SIZE=256
-PPO_MINI_BATCH_SIZE=64
-PPO_MICRO_BATCH_SIZE=32
-LOG_PROB_MICRO_BATCH_SIZE=32
-N_GPUS=1
 
-# # 1x H200 140GB
+# # 1x H100 80GB for 1.5B model
 # TRAIN_BATCH_SIZE=256
 # PPO_MINI_BATCH_SIZE=64
 # PPO_MICRO_BATCH_SIZE=32
-# LOG_PROB_MICRO_BATCH_SIZE=64
+# LOG_PROB_MICRO_BATCH_SIZE=32
 # N_GPUS=1
 
-# # 2x H100 NVL 94GB
-# TRAIN_BATCH_SIZE=256
-# PPO_MINI_BATCH_SIZE=64
-# PPO_MICRO_BATCH_SIZE=16
-# LOG_PROB_MICRO_BATCH_SIZE=32
-# N_GPUS=2
+# 1x H200 140GB for 7B model
+TRAIN_BATCH_SIZE=288
+PPO_MINI_BATCH_SIZE=96
+PPO_MICRO_BATCH_SIZE=48
+LOG_PROB_MICRO_BATCH_SIZE=48
+N_GPUS=1
+
 
 
 # Export configuration for length-aware reward function
 export LENGTH_PENALTY=0.01
 export TOKENIZER_MODEL_NAME=${ACTOR}
+if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
+    export FORMAT_ONLY_ANSWER_PENALTY=1.0
+else
+    export FORMAT_ONLY_ANSWER_PENALTY=0.0
+fi
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
@@ -95,6 +104,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.test_freq=2 \
   trainer.total_epochs=${EPOCHS} \
   trainer.log_val_generations=15 \
+  trainer.rollout_data_dir=/workspace/generation_logs/${EXP} \
 
 #  actor_rollout_ref.rollout.max_num_seqs=2560 \
 #  actor_rollout_ref.rollout.max_model_len=1536 \
