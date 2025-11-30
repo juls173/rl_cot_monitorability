@@ -11,6 +11,7 @@ WANDB_API_KEY="6dff329b191825f14c13f6a4600ec43b34a68baf"
 DATASET="gsm8k"  # Options: "gsm8k" or "bigmath"
 NUM_BUDGET_COPIES=1
 BUDGET_VALUES="control"
+BUDGET_WINDOW=0  # Window around budget where no penalty is applied
 FORMAT_ONLY_ANSWER=false  # Set to true to enable format-only answer instruction
 BIGMATH_EXTRA_ARGS=""  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
 
@@ -144,15 +145,15 @@ if [ "${DATASET}" = "gsm8k" ]; then
     # Check if dataset already exists
     BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
-        DATA_DIR=~/../workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format
+        DATA_DIR=~/../workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_format
     else
-        DATA_DIR=~/../workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}
+        DATA_DIR=~/../workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}
     fi
     if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
         echo "GSM8K dataset already exists, skipping download..."
     else
         # Build the command with optional format flag
-        CMD="python /workspace/${REPO_NAME}/scripts/gsm8k_token_budget.py --local_save_dir ${DATA_DIR} --num_budget_copies ${NUM_BUDGET_COPIES} --budget_values ${BUDGET_VALUES}"
+        CMD="python /workspace/${REPO_NAME}/scripts/gsm8k_token_budget.py --local_save_dir ${DATA_DIR} --num_budget_copies ${NUM_BUDGET_COPIES} --budget_values ${BUDGET_VALUES} --budget_window ${BUDGET_WINDOW}"
         if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
             CMD="${CMD} --format_only_answer"
         fi
@@ -161,9 +162,9 @@ if [ "${DATASET}" = "gsm8k" ]; then
     fi
 
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
-        echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format"
+        echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_format"
     else
-        echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+        echo "✓ GSM8K dataset downloaded to ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}"
     fi
 
 elif [ "${DATASET}" = "bigmath" ]; then
@@ -176,15 +177,15 @@ elif [ "${DATASET}" = "bigmath" ]; then
     # Check if dataset already exists
     BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
-        DATA_DIR=~/../workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format
+        DATA_DIR=~/../workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_format
     else
-        DATA_DIR=~/../workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}
+        DATA_DIR=~/../workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}
     fi
     if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
         echo "Big Math dataset already exists, skipping download..."
     else
         # Build the command with optional format flag
-        CMD="python /workspace/${REPO_NAME}/scripts/bigmath_token_budget.py --local-save-dir ${DATA_DIR} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values ${BUDGET_VALUES} ${BIGMATH_EXTRA_ARGS}"
+        CMD="python /workspace/${REPO_NAME}/scripts/bigmath_token_budget.py --local-save-dir ${DATA_DIR} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values ${BUDGET_VALUES} --budget-window ${BUDGET_WINDOW} ${BIGMATH_EXTRA_ARGS}"
         if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
             CMD="${CMD} --format-only-answer"
         fi
@@ -193,9 +194,9 @@ elif [ "${DATASET}" = "bigmath" ]; then
     fi
 
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
-        echo "✓ Big Math dataset downloaded to ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format"
+        echo "✓ Big Math dataset downloaded to ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_format"
     else
-        echo "✓ Big Math dataset downloaded to ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+        echo "✓ Big Math dataset downloaded to ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}"
     fi
 
 else
@@ -249,15 +250,15 @@ echo "Your repo location: /workspace/${REPO_NAME}"
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 if [ "${DATASET}" = "gsm8k" ]; then
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
-        echo "Dataset location: ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format"
+        echo "Dataset location: ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_format"
     else
-        echo "Dataset location: ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+        echo "Dataset location: ~/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}"
     fi
 elif [ "${DATASET}" = "bigmath" ]; then
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
-        echo "Dataset location: ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format"
+        echo "Dataset location: ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_format"
     else
-        echo "Dataset location: ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}"
+        echo "Dataset location: ~/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}"
     fi
 fi
 echo ""

@@ -12,6 +12,7 @@ import datasets
 INSTRUCTION_FOLLOWING = "Think step by step and output the final answer using \\boxed{}."
 INSTRUCTION_FOLLOWING_FORMAT_ONLY = "Think step by step and output ONLY the final answer using \\boxed{}. Do not provide any other explanation."
 TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process as close as possible to the thinking budget.'
+TOKEN_BUDGET_WINDOW_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +/- {window} tokens of the budget.'
 
 
 def is_numerical(answer: str) -> bool:
@@ -45,7 +46,7 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False):
+def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0):
     """Create multiple copies of each example with different token budgets."""
     expanded = []
     
@@ -59,9 +60,14 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_
             if budget == 'control':
                 question = example["problem"] + "\n\n" + instruction
             else:
+                # Use window-aware prompt if budget_window > 0
+                if budget_window > 0:
+                    budget_str = TOKEN_BUDGET_WINDOW_STR.format(budget=budget, window=budget_window)
+                else:
+                    budget_str = TOKEN_BUDGET_STR.format(budget=budget)
                 question = (
                     example["problem"] + "\n\n" + 
-                    TOKEN_BUDGET_STR.format(budget=budget) + " " + 
+                    budget_str + " " + 
                     instruction
                 )
             
@@ -82,6 +88,7 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_
                     "domain": example["domain"],
                     "llama8b_solve_rate": example["llama8b_solve_rate"],
                     "budget": budget,
+                    "budget_window": budget_window,
                     "copy_idx": copy_idx,
                     "format_only_answer": format_only_answer,
                 },
@@ -102,6 +109,7 @@ def bigmath_token_budget(
     train_fraction=0.8,
     numerical_only=False,
     format_only_answer=False,
+    budget_window=0,
     seed=42
 ):
     """
@@ -118,6 +126,7 @@ def bigmath_token_budget(
         train_fraction: Fraction of data to use for training
         numerical_only: If True, only include problems with numerical answers
         format_only_answer: If True, instruct model to output only boxed answer with no explanation
+        budget_window: Window around budget where no penalty is applied (default 0)
         seed: Random seed for reproducibility
     """
     random.seed(seed)
@@ -161,8 +170,8 @@ def bigmath_token_budget(
     test_dataset = test_dataset.map(lambda x: {"split": "test"})
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source, format_only_answer)
-    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source, format_only_answer)
+    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window)
+    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window)
     
     # Save to parquet
     os.makedirs(local_save_dir, exist_ok=True)
@@ -238,6 +247,12 @@ if __name__ == "__main__":
         default=42,
         help="Random seed for reproducibility (default: 42)"
     )
+    parser.add_argument(
+        "--budget-window",
+        type=int,
+        default=0,
+        help="Window around budget where no penalty is applied (default: 0)"
+    )
     
     args = parser.parse_args()
     
@@ -266,6 +281,7 @@ if __name__ == "__main__":
         train_fraction=args.train_fraction,
         numerical_only=args.numerical_only,
         format_only_answer=args.format_only_answer,
+        budget_window=args.budget_window,
         seed=args.seed
     )
 

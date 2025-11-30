@@ -23,11 +23,13 @@ def load_gsm8k_parquet(path: str) -> pd.DataFrame:
         ground_truth = row['reward_model']['ground_truth']
         extra_info = row['extra_info']
         budget = extra_info['budget']
+        budget_window = extra_info.get('budget_window', 0)
         
         rows.append({
             'prompt': prompt_messages,
             'ground_truth': ground_truth,
             'budget': budget,
+            'budget_window': budget_window,
             'question': extra_info['question'],
             'answer': extra_info['answer'],
             'format_only_answer': extra_info.get('format_only_answer', False),
@@ -79,6 +81,7 @@ def eval_gsm8k_length(
     limit: Optional[int] = None,
     lora_path: Optional[str] = None,
     length_penalty: Optional[float] = None,
+    format_penalty: Optional[float] = None,
     forbidden_word: Optional[str] = None,
 ):
     """Run evaluation on GSM8K with length constraints.
@@ -87,6 +90,9 @@ def eval_gsm8k_length(
     should point to the LoRA adapter directory.
     
     If length_penalty is provided, it will be used for reward computation;
+    otherwise it is loaded from environment variables.
+    
+    If format_penalty is provided, it will be used for reward computation;
     otherwise it is loaded from environment variables.
     """
     # Load data
@@ -192,6 +198,7 @@ def eval_gsm8k_length(
         # Convert budget to int only if it's not 'control'
         if budget != 'control':
             budget = int(budget)
+        budget_window = int(df.iloc[i]["budget_window"])
         prompt_messages = df.iloc[i]["prompt"]
         formatted_prompt = prompts[i]
         
@@ -202,7 +209,9 @@ def eval_gsm8k_length(
             generated_text, 
             ground_truth, 
             budget, 
+            budget_window=budget_window,
             length_penalty=length_penalty,
+            format_penalty=format_penalty,
             tokenizer=tokenizer
         )
         
@@ -230,6 +239,7 @@ def eval_gsm8k_length(
             "idx": i,
             "question": df.iloc[i]["question"],
             "budget": budget,
+            "budget_window": budget_window,
             "ground_truth": ground_truth,
             "format_only_answer": df.iloc[i]["format_only_answer"],
             "prompt": formatted_prompt,
@@ -428,6 +438,8 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--length-penalty", type=float, default=None, 
                     help="Penalty per token of distance from budget (loads from env if not provided)")
+    ap.add_argument("--format-penalty", type=float, default=None,
+                    help="Penalty for incorrect format (loads from env if not provided)")
     ap.add_argument("--forbidden-word", type=str, default=None,
                     help="Word to forbid in the model's private reasoning")
     
@@ -446,6 +458,7 @@ if __name__ == "__main__":
         limit=args.limit,
         lora_path=args.lora_path,
         length_penalty=args.length_penalty,
+        format_penalty=args.format_penalty,
         forbidden_word=args.forbidden_word,
     )
 

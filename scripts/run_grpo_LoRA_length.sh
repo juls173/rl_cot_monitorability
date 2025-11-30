@@ -6,8 +6,9 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_USE_V1=0
 
 NUM_BUDGET_COPIES=1
-BUDGET_VALUES="10 500"
+BUDGET_VALUES="50"
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
+BUDGET_WINDOW=0
 FORMAT_ONLY_ANSWER=false
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
     FORMAT_STRING="_format"
@@ -18,15 +19,15 @@ LR=5e-4
 LORA_RANK=32
 LORA_ALPHA=64
 EPOCHS=1
-# DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_format
-DATA_DIR=/workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}${FORMAT_STRING}
+# DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}
+DATA_DIR=/workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}
 REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/reward_length.py
 REWARD_FN_NAME=compute_score
 # ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 # PROJECT=verl_gsm8k_length
 PROJECT=verl_bigmath_length
-EXP="25_11_17_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
+EXP="25_11_24_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
 
 
 # # 1x H100 80GB for 1.5B model
@@ -36,17 +37,23 @@ EXP="25_11_17_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTE
 # LOG_PROB_MICRO_BATCH_SIZE=32
 # N_GPUS=1
 
-# 1x H200 140GB for 7B model
-TRAIN_BATCH_SIZE=288
-PPO_MINI_BATCH_SIZE=96
-PPO_MICRO_BATCH_SIZE=48
-LOG_PROB_MICRO_BATCH_SIZE=48
-N_GPUS=1
+# # 1x H200 140GB for 7B model
+# TRAIN_BATCH_SIZE=288
+# PPO_MINI_BATCH_SIZE=96
+# PPO_MICRO_BATCH_SIZE=48
+# LOG_PROB_MICRO_BATCH_SIZE=48
+# N_GPUS=1
 
-
+# 2x H100 80GB for 7B model
+TRAIN_BATCH_SIZE=256
+PPO_MINI_BATCH_SIZE=64
+PPO_MICRO_BATCH_SIZE=32
+LOG_PROB_MICRO_BATCH_SIZE=32
+N_GPUS=2
 
 # Export configuration for length-aware reward function
-export LENGTH_PENALTY=0.01
+# export LENGTH_PENALTY=0.01
+export LENGTH_PENALTY=0.002
 export TOKENIZER_MODEL_NAME=${ACTOR}
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
     export FORMAT_ONLY_ANSWER_PENALTY=1.0
@@ -77,6 +84,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.clip_ratio=0.2 \
   actor_rollout_ref.actor.entropy_coeff=0 \
   actor_rollout_ref.actor.strategy=fsdp2 \
+  actor_rollout_ref.actor.checkpoint.save_contents="['optimizer', 'extra']" \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.actor.fsdp_config.param_offload=False \
   actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
@@ -100,23 +108,13 @@ python3 -m verl.trainer.main_ppo \
   trainer.experiment_name=${EXP} \
   trainer.n_gpus_per_node=${N_GPUS} \
   trainer.nnodes=1 \
-  trainer.save_freq=8 \
+  trainer.save_freq=2 \
   trainer.test_freq=2 \
   trainer.total_epochs=${EPOCHS} \
   trainer.log_val_generations=15 \
-  trainer.rollout_data_dir=/workspace/generation_logs/${EXP} \
+  trainer.rollout_data_dir=/workspace/training_logs/${EXP}/generation \
+  trainer.validation_data_dir=/workspace/training_logs/${EXP}/validation \
 
 #  actor_rollout_ref.rollout.max_num_seqs=2560 \
 #  actor_rollout_ref.rollout.max_model_len=1536 \
 #  actor_rollout_ref.rollout.max_num_batched_tokens=65536 \
-
-# Run post-processing: merge model and evaluate
-# Output directory will be determined based on the highest checkpoint found
-# OUTPUT_DIR=/workspace/${EXP}
-# bash /workspace/rl_cot_monitorability/scripts/merge_eval.sh \
-#   "${ACTOR}" \
-#   "${LORA_ALPHA}" \
-#   "${PROJECT}" \
-#   "${EXP}" \
-#   "${DATA_DIR}" \
-#   "${OUTPUT_DIR}"

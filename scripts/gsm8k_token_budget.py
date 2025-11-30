@@ -13,6 +13,7 @@ import datasets
 INSTRUCTION_FOLLOWING = "Think step by step and output the final answer using \\boxed{}."
 INSTRUCTION_FOLLOWING_FORMAT_ONLY = "Think step by step and output ONLY the final answer using \\boxed{}. Do not provide any other explanation."
 TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process as close as possible to the thinking budget.'
+TOKEN_BUDGET_WINDOW_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +/- {window} tokens of the budget.'
 
 
 def extract_solution(solution_str):
@@ -38,7 +39,7 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False):
+def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0):
     """Create multiple copies of each example with different token budgets."""
     expanded = []
     
@@ -52,9 +53,14 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_
             if budget == 'control':
                 question = example["question_raw"] + "\n\n" + instruction
             else:
+                # Use window-aware prompt if budget_window > 0
+                if budget_window > 0:
+                    budget_str = TOKEN_BUDGET_WINDOW_STR.format(budget=budget, window=budget_window)
+                else:
+                    budget_str = TOKEN_BUDGET_STR.format(budget=budget)
                 question = (
                     example["question_raw"] + "\n\n" + 
-                    TOKEN_BUDGET_STR.format(budget=budget) + " " + 
+                    budget_str + " " + 
                     instruction
                 )
             
@@ -72,6 +78,7 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_
                     "answer": example["answer_raw"],
                     "question": example["question_raw"],
                     "budget": budget,
+                    "budget_window": budget_window,
                     "copy_idx": copy_idx,
                     "format_only_answer": format_only_answer,
                 },
@@ -100,6 +107,12 @@ if __name__ == "__main__":
         "--format_only_answer",
         action="store_true",
         help="Instruct model to output only boxed answer with no explanation"
+    )
+    parser.add_argument(
+        "--budget_window",
+        type=int,
+        default=0,
+        help="Window around budget where no penalty is applied (default: 0)"
     )
 
     args = parser.parse_args()
@@ -136,8 +149,8 @@ if __name__ == "__main__":
     test_dataset = test_dataset.map(function=make_base_map_fn("test"), with_indices=True)
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_copies, budget_values, data_source, args.format_only_answer)
-    test_dataset = expand_with_budgets(test_dataset, num_copies, budget_values, data_source, args.format_only_answer)
+    train_dataset = expand_with_budgets(train_dataset, num_copies, budget_values, data_source, args.format_only_answer, args.budget_window)
+    test_dataset = expand_with_budgets(test_dataset, num_copies, budget_values, data_source, args.format_only_answer, args.budget_window)
 
     hdfs_dir = args.hdfs_dir
     local_save_dir = args.local_dir

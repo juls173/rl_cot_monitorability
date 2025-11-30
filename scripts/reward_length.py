@@ -21,6 +21,30 @@ def _load_from_env():
     if _FORMAT_PENALTY is None:
         _FORMAT_PENALTY = float(os.environ.get("FORMAT_ONLY_ANSWER_PENALTY", 0.0))
 
+
+def compute_length_penalty(token_count: int, budget: int, budget_window: int, length_penalty: float) -> float:
+    """Compute the length penalty based on token count and budget window.
+    
+    The penalty is zero within budget ± budget_window, then increases linearly
+    from the edge of the window.
+    
+    Args:
+        token_count: Number of tokens in the solution
+        budget: Target token budget
+        budget_window: Window around budget where no penalty is applied
+        length_penalty: Penalty per token outside the window
+    
+    Returns:
+        Negative penalty value (or 0.0 if within window)
+    """
+    distance_from_budget = abs(token_count - budget)
+    if distance_from_budget <= budget_window:
+        return 0.0
+    else:
+        # Penalty starts from the edge of the window
+        effective_distance = distance_from_budget - budget_window
+        return -length_penalty * effective_distance
+
 def extract_answer(solution_str: str, method: Literal["strict", "flexible"] = "flexible") -> Optional[str]:
     """Extract numerical answer from various formats."""
     
@@ -49,6 +73,7 @@ def compute_reward_breakdown(
     solution_str: str,
     ground_truth: str,
     budget,  # Can be int or 'control'
+    budget_window: int = 0,
     length_penalty: Optional[float] = None,
     format_penalty: Optional[float] = None,
     tokenizer = None
@@ -59,6 +84,7 @@ def compute_reward_breakdown(
         solution_str: The generated solution text
         ground_truth: The correct answer
         budget: Token budget for the solution, or 'control' for no budget constraint
+        budget_window: Window around budget where no penalty is applied (default 0)
         length_penalty: Penalty per token of distance from budget (loads from env if None)
         format_penalty: Penalty for incorrect format (loads from env if None)
         tokenizer: Tokenizer to use (loads from env if None)
@@ -114,7 +140,7 @@ def compute_reward_breakdown(
         reward_length_penalty = 0.0
     else:
         length_diff = abs(token_count - budget)
-        reward_length_penalty = -length_penalty * length_diff
+        reward_length_penalty = compute_length_penalty(token_count, budget, budget_window, length_penalty)
 
     # Compute format penalty
     if format_penalty > 0.0:
@@ -155,5 +181,6 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
         raise RuntimeError("Thinking budget not found in extra_info")
     
     budget = extra_info['budget']
-    result = compute_reward_breakdown(solution_str, ground_truth, budget)
+    budget_window = extra_info.get('budget_window', 0)
+    result = compute_reward_breakdown(solution_str, ground_truth, budget, budget_window=budget_window)
     return result['total_reward']
