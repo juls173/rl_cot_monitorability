@@ -3,6 +3,12 @@ import re
 from typing import Literal, Optional
 from transformers import AutoTokenizer
 
+try:
+    import wandb
+    _WANDB_AVAILABLE = True
+except ImportError:
+    _WANDB_AVAILABLE = False
+
 # Global variables (lazy-loaded from environment if not passed as arguments)
 _LENGTH_PENALTY = None
 _MODEL_NAME = None
@@ -204,6 +210,14 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
     
     # Increment call count for warmup tracking
     _CALL_COUNT += 1
+    
+    # Log warmup progress to WandB periodically
+    if _WANDB_AVAILABLE and wandb.run is not None and _CALL_COUNT % 1000 == 0:
+        warmup_factor = _get_warmup_factor()
+        wandb.log({
+            "reward/call_count": _CALL_COUNT,
+            "reward/warmup_factor": warmup_factor,
+        }, commit=False)
     
     budget = extra_info['budget']
     budget_window = extra_info.get('budget_window', 0)
