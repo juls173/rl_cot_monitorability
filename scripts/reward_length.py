@@ -8,10 +8,12 @@ _LENGTH_PENALTY = None
 _MODEL_NAME = None
 _TOKENIZER = None
 _FORMAT_PENALTY = None
+_WARMUP_PERIOD = None
+_CALL_COUNT = 0
 
 def _load_from_env():
     """Lazy-load configuration from environment variables."""
-    global _LENGTH_PENALTY, _MODEL_NAME, _TOKENIZER, _FORMAT_PENALTY
+    global _LENGTH_PENALTY, _MODEL_NAME, _TOKENIZER, _FORMAT_PENALTY, _WARMUP_PERIOD
     if _LENGTH_PENALTY is None:
         _LENGTH_PENALTY = float(os.environ["LENGTH_PENALTY"])
     if _MODEL_NAME is None:
@@ -20,6 +22,16 @@ def _load_from_env():
         _TOKENIZER = AutoTokenizer.from_pretrained(_MODEL_NAME)
     if _FORMAT_PENALTY is None:
         _FORMAT_PENALTY = float(os.environ.get("FORMAT_ONLY_ANSWER_PENALTY", 0.0))
+    if _WARMUP_PERIOD is None:
+        warmup_str = os.environ.get("PENALTY_WARMUP_PERIOD")
+        _WARMUP_PERIOD = int(warmup_str) if warmup_str is not None else 0
+
+
+def _get_warmup_factor() -> float:
+    """Get the current warmup factor based on call count and warmup period."""
+    if _WARMUP_PERIOD is None or _WARMUP_PERIOD <= 0:
+        return 1.0
+    return min(1.0, _CALL_COUNT / _WARMUP_PERIOD)
 
 
 def compute_length_penalty(token_count: int, budget: int, budget_window: int, length_penalty: float) -> float:
@@ -76,7 +88,8 @@ def compute_reward_breakdown(
     budget_window: int = 0,
     length_penalty: Optional[float] = None,
     format_penalty: Optional[float] = None,
-    tokenizer = None
+    tokenizer = None,
+    use_warmup: bool = False
 ) -> dict:
     """Compute detailed breakdown of correctness and length rewards.
     
@@ -88,6 +101,7 @@ def compute_reward_breakdown(
         length_penalty: Penalty per token of distance from budget (loads from env if None)
         format_penalty: Penalty for incorrect format (loads from env if None)
         tokenizer: Tokenizer to use (loads from env if None)
+        use_warmup: Whether to apply warmup scaling to penalties (default False)
     
     Returns:
         Dictionary containing:
@@ -108,6 +122,12 @@ def compute_reward_breakdown(
             tokenizer = _TOKENIZER
         if format_penalty is None:
             format_penalty = _FORMAT_PENALTY
+    
+    # Apply warmup factor if enabled
+    if use_warmup:
+        warmup_factor = _get_warmup_factor()
+        length_penalty = length_penalty * warmup_factor
+        format_penalty = format_penalty * warmup_factor
     
     # Compute correctness reward on the text after the end of the CoT
     if "</think>" not in solution_str:
@@ -177,10 +197,15 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
     This is the main interface used during training. It loads configuration from
     environment variables and returns just the total reward.
     """
+    global _CALL_COUNT
+    
     if 'budget' not in extra_info:
         raise RuntimeError("Thinking budget not found in extra_info")
     
+    # Increment call count for warmup tracking
+    _CALL_COUNT += 1
+    
     budget = extra_info['budget']
     budget_window = extra_info.get('budget_window', 0)
-    result = compute_reward_breakdown(solution_str, ground_truth, budget, budget_window=budget_window)
+    result = compute_reward_breakdown(solution_str, ground_truth, budget, budget_window=budget_window, use_warmup=True)
     return result['total_reward']

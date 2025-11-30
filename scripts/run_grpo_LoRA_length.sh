@@ -9,6 +9,7 @@ NUM_BUDGET_COPIES=1
 BUDGET_VALUES="50"
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 BUDGET_WINDOW=0
+PENALTY_WARMUP=10000
 FORMAT_ONLY_ANSWER=false
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
     FORMAT_STRING="_format"
@@ -27,7 +28,7 @@ REWARD_FN_NAME=compute_score
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 # PROJECT=verl_gsm8k_length
 PROJECT=verl_bigmath_length
-EXP="25_11_24_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
+EXP="25_11_24_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_warmup${PENALTY_WARMUP}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
 
 
 # # 1x H100 80GB for 1.5B model
@@ -60,6 +61,7 @@ if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
 else
     export FORMAT_ONLY_ANSWER_PENALTY=0.0
 fi
+export PENALTY_WARMUP_PERIOD=${PENALTY_WARMUP}
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
