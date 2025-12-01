@@ -39,8 +39,11 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0):
-    """Create multiple copies of each example with different token budgets."""
+def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0, decreasing_budgets=False):
+    """Create multiple copies of each example with different token budgets.
+    
+    If decreasing_budgets is True, examples are sorted by budget (descending) after creation.
+    """
     expanded = []
     
     instruction = INSTRUCTION_FOLLOWING_FORMAT_ONLY if format_only_answer else INSTRUCTION_FOLLOWING
@@ -85,34 +88,43 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_
             }
             expanded.append(data)
     
+    # Sort by budget descending if requested (treat 'control' as infinity so it comes first)
+    if decreasing_budgets:
+        expanded.sort(key=lambda x: float('inf') if x["extra_info"]["budget"] == 'control' else x["extra_info"]["budget"], reverse=True)
+    
     return datasets.Dataset.from_list(expanded)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--local_dir", default=None, help="The save directory for the preprocessed dataset.")
-    parser.add_argument("--hdfs_dir", default=None)
-    parser.add_argument("--local_dataset_path", default=None, help="The local path to the raw dataset, if it exists.")
+    parser.add_argument("--local-dir", default=None, help="The save directory for the preprocessed dataset.")
+    parser.add_argument("--hdfs-dir", default=None)
+    parser.add_argument("--local-dataset-path", default=None, help="The local path to the raw dataset, if it exists.")
     parser.add_argument(
-        "--local_save_dir", default="~/data/gsm8k", help="The save directory for the preprocessed dataset."
+        "--local-save-dir", default="~/data/gsm8k", help="The save directory for the preprocessed dataset."
     )
     parser.add_argument(
-        "--num_budget_copies", type=int, default=1, help="Number of copies of each problem with different budgets."
+        "--num-budget-copies", type=int, default=1, help="Number of copies of each problem with different budgets."
     )
     parser.add_argument(
-        "--budget_values", nargs='+', default=[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+        "--budget-values", nargs='+', default=[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
         help="Possible token budget values to sample from. Can include 'control' for no budget constraint."
     )
     parser.add_argument(
-        "--format_only_answer",
+        "--format-only-answer",
         action="store_true",
         help="Instruct model to output only boxed answer with no explanation"
     )
     parser.add_argument(
-        "--budget_window",
+        "--budget-window",
         type=int,
         default=0,
         help="Window around budget where no penalty is applied (default: 0)"
+    )
+    parser.add_argument(
+        "--decreasing-budgets",
+        action="store_true",
+        help="Sort examples by budget (descending) for curriculum-style training"
     )
 
     args = parser.parse_args()
@@ -132,6 +144,9 @@ if __name__ == "__main__":
             f"available budget values ({len(budget_values)})"
         )
     
+    if args.decreasing_budgets and len(budget_values) < 2:
+        raise ValueError("--decreasing_budgets requires at least 2 budget values")
+    
     local_dataset_path = args.local_dataset_path
 
     data_source = "openai/gsm8k"
@@ -149,13 +164,13 @@ if __name__ == "__main__":
     test_dataset = test_dataset.map(function=make_base_map_fn("test"), with_indices=True)
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_copies, budget_values, data_source, args.format_only_answer, args.budget_window)
-    test_dataset = expand_with_budgets(test_dataset, num_copies, budget_values, data_source, args.format_only_answer, args.budget_window)
+    train_dataset = expand_with_budgets(train_dataset, num_copies, budget_values, data_source, args.format_only_answer, args.budget_window, args.decreasing_budgets)
+    test_dataset = expand_with_budgets(test_dataset, num_copies, budget_values, data_source, args.format_only_answer, args.budget_window, args.decreasing_budgets)
 
     hdfs_dir = args.hdfs_dir
     local_save_dir = args.local_dir
     if local_save_dir is not None:
-        print("Warning: Argument 'local_dir' is deprecated. Please use 'local_save_dir' instead.")
+        print("Warning: Argument 'local-dir' is deprecated. Please use 'local-save-dir' instead.")
     else:
         local_save_dir = args.local_save_dir
 

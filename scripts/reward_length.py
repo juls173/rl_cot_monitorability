@@ -208,18 +208,22 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
     if 'budget' not in extra_info:
         raise RuntimeError("Thinking budget not found in extra_info")
     
-    # Increment call count for warmup tracking
-    _CALL_COUNT += 1
+    # Only use warmup during training, not validation
+    is_training = extra_info.get('split') == 'train'
     
-    # Log warmup progress to WandB periodically
-    if _WANDB_AVAILABLE and wandb.run is not None and _CALL_COUNT % 1000 == 0:
-        warmup_factor = _get_warmup_factor()
-        wandb.log({
-            "reward/call_count": _CALL_COUNT,
-            "reward/warmup_factor": warmup_factor,
-        }, commit=False)
+    if is_training:
+        # Increment call count for warmup tracking
+        _CALL_COUNT += 1
+        
+        # Log warmup progress to WandB periodically
+        if _WANDB_AVAILABLE and wandb.run is not None and _CALL_COUNT % 1000 == 0:
+            warmup_factor = _get_warmup_factor()
+            wandb.log({
+                "reward/call_count": _CALL_COUNT,
+                "reward/warmup_factor": warmup_factor,
+            }, commit=False)
     
     budget = extra_info['budget']
     budget_window = extra_info.get('budget_window', 0)
-    result = compute_reward_breakdown(solution_str, ground_truth, budget, budget_window=budget_window, use_warmup=True)
+    result = compute_reward_breakdown(solution_str, ground_truth, budget, budget_window=budget_window, use_warmup=is_training)
     return result['total_reward']

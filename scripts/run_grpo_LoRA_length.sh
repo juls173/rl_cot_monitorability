@@ -9,19 +9,25 @@ NUM_BUDGET_COPIES=1
 BUDGET_VALUES="50 500"
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 BUDGET_WINDOW=25
-PENALTY_WARMUP=10000
+PENALTY_WARMUP=250000
 FORMAT_ONLY_ANSWER=false
+DECREASING_BUDGETS=false
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
     FORMAT_STRING="_format"
 else
     FORMAT_STRING=""
 fi
+if [ "${DECREASING_BUDGETS}" = true ]; then
+    DECREASING_STRING="_dec"
+else
+    DECREASING_STRING=""
+fi
 LR=5e-4
 LORA_RANK=32
 LORA_ALPHA=64
 EPOCHS=1
-# DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}
-DATA_DIR=/workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}
+# DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}
+DATA_DIR=/workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}
 REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/reward_length.py
 REWARD_FN_NAME=compute_score
 # ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
@@ -63,6 +69,13 @@ else
 fi
 export PENALTY_WARMUP_PERIOD=${PENALTY_WARMUP}
 
+# Disable shuffle if using decreasing budgets (curriculum training)
+if [ "${DECREASING_BUDGETS}" = true ]; then
+    DATA_SHUFFLE=False
+else
+    DATA_SHUFFLE=True
+fi
+
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
   algorithm.use_kl_in_reward=False \
@@ -73,6 +86,7 @@ python3 -m verl.trainer.main_ppo \
   data.max_response_length=768 \
   data.filter_overlong_prompts=True \
   data.truncation=error \
+  data.shuffle=${DATA_SHUFFLE} \
   actor_rollout_ref.model.path=${ACTOR} \
   actor_rollout_ref.model.lora_rank=${LORA_RANK} \
   actor_rollout_ref.model.lora_alpha=${LORA_ALPHA} \

@@ -46,8 +46,11 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0):
-    """Create multiple copies of each example with different token budgets."""
+def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0, decreasing_budgets=False):
+    """Create multiple copies of each example with different token budgets.
+    
+    If decreasing_budgets is True, examples are sorted by budget (descending) after creation.
+    """
     expanded = []
     
     instruction = INSTRUCTION_FOLLOWING_FORMAT_ONLY if format_only_answer else INSTRUCTION_FOLLOWING
@@ -95,6 +98,10 @@ def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_
             }
             expanded.append(data)
     
+    # Sort by budget descending if requested (treat 'control' as infinity so it comes first)
+    if decreasing_budgets:
+        expanded.sort(key=lambda x: float('inf') if x["extra_info"]["budget"] == 'control' else x["extra_info"]["budget"], reverse=True)
+    
     return datasets.Dataset.from_list(expanded)
 
 
@@ -110,6 +117,7 @@ def bigmath_token_budget(
     numerical_only=False,
     format_only_answer=False,
     budget_window=0,
+    decreasing_budgets=False,
     seed=42
 ):
     """
@@ -127,6 +135,7 @@ def bigmath_token_budget(
         numerical_only: If True, only include problems with numerical answers
         format_only_answer: If True, instruct model to output only boxed answer with no explanation
         budget_window: Window around budget where no penalty is applied (default 0)
+        decreasing_budgets: If True, order examples by budget (descending) instead of random sampling
         seed: Random seed for reproducibility
     """
     random.seed(seed)
@@ -170,8 +179,8 @@ def bigmath_token_budget(
     test_dataset = test_dataset.map(lambda x: {"split": "test"})
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window)
-    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window)
+    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window, decreasing_budgets)
+    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window, decreasing_budgets)
     
     # Save to parquet
     os.makedirs(local_save_dir, exist_ok=True)
@@ -253,6 +262,11 @@ if __name__ == "__main__":
         default=0,
         help="Window around budget where no penalty is applied (default: 0)"
     )
+    parser.add_argument(
+        "--decreasing-budgets",
+        action="store_true",
+        help="Sort examples by budget (descending) for curriculum-style training"
+    )
     
     args = parser.parse_args()
     
@@ -270,6 +284,9 @@ if __name__ == "__main__":
             f"available budget values ({len(budget_values)})"
         )
     
+    if args.decreasing_budgets and len(budget_values) < 2:
+        raise ValueError("--decreasing-budgets requires at least 2 budget values")
+    
     bigmath_token_budget(
         local_save_dir=args.local_save_dir,
         num_budget_copies=args.num_budget_copies,
@@ -282,6 +299,7 @@ if __name__ == "__main__":
         numerical_only=args.numerical_only,
         format_only_answer=args.format_only_answer,
         budget_window=args.budget_window,
+        decreasing_budgets=args.decreasing_budgets,
         seed=args.seed
     )
 
