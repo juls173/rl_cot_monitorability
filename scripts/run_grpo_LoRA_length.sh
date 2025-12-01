@@ -8,16 +8,16 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Dataset configuration
 DATASET="bigmath"  # Options: "gsm8k" or "bigmath"
 NUM_BUDGET_COPIES=1
-BUDGET_VALUES="50 500"
-BUDGET_WINDOW=25
+BUDGET_VALUES="50 100 200 300 400 500"
+BUDGET_WINDOW=50
 FORMAT_ONLY_ANSWER=false
-DECREASING_BUDGETS=false
-BIGMATH_EXTRA_ARGS=""  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
+DECREASING_BUDGETS=true
+BIGMATH_EXTRA_ARGS="--numerical-only --min-solve-rate 0.1 --max-solve-rate 0.9 --max-samples 31250 --train-fraction 0.96"  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
 DATA_BASE_DIR="/workspace/data"
 REPO_DIR="/workspace/rl_cot_monitorability"
 
 # Training configuration
-PENALTY_WARMUP=250000
+PENALTY_WARMUP=0
 LR=5e-4
 LORA_RANK=32
 LORA_ALPHA=64
@@ -51,7 +51,7 @@ REWARD_FN_NAME=compute_score
 # ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 PROJECT=verl_${DATASET}_length
-EXP="25_11_24_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_warmup${PENALTY_WARMUP}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
+EXP="25_12_01_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_warmup${PENALTY_WARMUP}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
 
 
 # # 1x H100 80GB for 1.5B model

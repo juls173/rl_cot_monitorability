@@ -17,6 +17,10 @@ _FORMAT_PENALTY = None
 _WARMUP_PERIOD = None
 _CALL_COUNT = 0
 
+# Accumulator for WandB logging (tracks metrics between split changes)
+_CURRENT_SPLIT = None
+_ACCUMULATED_METRICS: dict[str, list[float]] = {}
+
 def _load_from_env():
     """Lazy-load configuration from environment variables."""
     global _LENGTH_PENALTY, _MODEL_NAME, _TOKENIZER, _FORMAT_PENALTY, _WARMUP_PERIOD
@@ -197,19 +201,67 @@ def compute_reward_breakdown(
     }
 
 
+def _log_accumulated_metrics(split: str) -> None:
+    """Log accumulated metrics to WandB and reset accumulators."""
+    global _ACCUMULATED_METRICS
+    
+    if not _WANDB_AVAILABLE or wandb.run is None:
+        return
+    
+    if not _ACCUMULATED_METRICS:
+        return
+    
+    # Compute means and log
+    prefix = "reward_train" if split == "train" else "reward_test"
+    log_dict = {}
+    for key, values in _ACCUMULATED_METRICS.items():
+        if values:
+            log_dict[f"{prefix}/{key}"] = sum(values) / len(values)
+    
+    if log_dict:
+        log_dict[f"{prefix}/n_samples"] = len(_ACCUMULATED_METRICS.get("total_reward", []))
+        wandb.log(log_dict, commit=False)
+    
+    # Reset accumulators
+    _ACCUMULATED_METRICS = {}
+
+
+def _accumulate_metrics(result: dict) -> None:
+    """Accumulate metrics from a reward breakdown result."""
+    global _ACCUMULATED_METRICS
+    
+    for key in ["correctness_reward", "token_count", "length_penalty", "format_penalty", "total_reward"]:
+        if key not in _ACCUMULATED_METRICS:
+            _ACCUMULATED_METRICS[key] = []
+        _ACCUMULATED_METRICS[key].append(result[key])
+    
+    # length_diff can be None for control condition
+    if result["length_diff"] is not None:
+        if "length_diff" not in _ACCUMULATED_METRICS:
+            _ACCUMULATED_METRICS["length_diff"] = []
+        _ACCUMULATED_METRICS["length_diff"].append(result["length_diff"])
+
+
 def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_info: dict) -> float:
     """Compute total reward score (for RL training).
     
     This is the main interface used during training. It loads configuration from
     environment variables and returns just the total reward.
     """
-    global _CALL_COUNT
+    global _CALL_COUNT, _CURRENT_SPLIT
     
     if 'budget' not in extra_info:
         raise RuntimeError("Thinking budget not found in extra_info")
     
+    current_split = extra_info.get('split')
+    
+    # Check if split changed - if so, log accumulated metrics from previous split
+    if _CURRENT_SPLIT is not None and current_split != _CURRENT_SPLIT:
+        _log_accumulated_metrics(_CURRENT_SPLIT)
+    _CURRENT_SPLIT = current_split
+    
     # Only use warmup during training, not validation
-    is_training = extra_info.get('split') == 'train'
+    is_training = current_split == 'train'
     
     if is_training:
         # Increment call count for warmup tracking
@@ -226,4 +278,8 @@ def compute_score(data_source: str, solution_str: str, ground_truth: str, extra_
     budget = extra_info['budget']
     budget_window = extra_info.get('budget_window', 0)
     result = compute_reward_breakdown(solution_str, ground_truth, budget, budget_window=budget_window, use_warmup=is_training)
+    
+    # Accumulate metrics for WandB logging
+    _accumulate_metrics(result)
+    
     return result['total_reward']
