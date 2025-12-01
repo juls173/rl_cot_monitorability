@@ -8,13 +8,6 @@ echo "=========================================="
 REPO_URL="https://github.com/juls173/rl_cot_monitorability.git" 
 REPO_BRANCH="baram"
 WANDB_API_KEY="6dff329b191825f14c13f6a4600ec43b34a68baf"
-DATASET="gsm8k"  # Options: "gsm8k" or "bigmath"
-NUM_BUDGET_COPIES=1
-BUDGET_VALUES="control"
-BUDGET_WINDOW=0  # Window around budget where no penalty is applied
-FORMAT_ONLY_ANSWER=false  # Set to true to enable format-only answer instruction
-DECREASING_BUDGETS=false  # Set to true to sort examples by budget (descending) for curriculum training
-BIGMATH_EXTRA_ARGS=""  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
 
 # ==========================================
 # 1. Download and Install Conda
@@ -134,50 +127,9 @@ fi
 echo "✓ code repository cloned"
 
 # ==========================================
-# 7. Download Dataset
+# 7. Configure W&B Login
 # ==========================================
-echo "Step 7: Downloading ${DATASET} dataset..."
-cd /workspace/verl/examples/data_preprocess
-
-# Build common path components
-BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
-FORMAT_STRING=""
-DECREASING_STRING=""
-if [ "${FORMAT_ONLY_ANSWER}" = true ]; then FORMAT_STRING="_format"; fi
-if [ "${DECREASING_BUDGETS}" = true ]; then DECREASING_STRING="_dec"; fi
-
-mkdir -p ~/../workspace/data/${DATASET}
-DATA_DIR=~/../workspace/data/${DATASET}_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}
-
-if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
-    echo "${DATASET} dataset already exists, skipping download..."
-else
-    # Dataset-specific script
-    if [ "${DATASET}" = "gsm8k" ]; then
-        SCRIPT="${REPO_NAME}/scripts/gsm8k_token_budget.py"
-        EXTRA_ARGS=""
-    elif [ "${DATASET}" = "bigmath" ]; then
-        SCRIPT="${REPO_NAME}/scripts/bigmath_token_budget.py"
-        EXTRA_ARGS="${BIGMATH_EXTRA_ARGS}"
-    else
-        echo "Error: Unknown dataset '${DATASET}'. Valid options are 'gsm8k' or 'bigmath'."
-        exit 1
-    fi
-
-    # Build command
-    CMD="python /workspace/${SCRIPT} --local-save-dir ${DATA_DIR} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values ${BUDGET_VALUES} --budget-window ${BUDGET_WINDOW} ${EXTRA_ARGS}"
-    if [ "${FORMAT_ONLY_ANSWER}" = true ]; then CMD="${CMD} --format-only-answer"; fi
-    if [ "${DECREASING_BUDGETS}" = true ]; then CMD="${CMD} --decreasing-budgets"; fi
-
-    eval ${CMD}
-fi
-
-echo "✓ ${DATASET} dataset downloaded to ${DATA_DIR}"
-
-# ==========================================
-# 8. Configure W&B Login
-# ==========================================
-echo "Step 8: Configuring Weights & Biases..."
+echo "Step 7: Configuring Weights & Biases..."
 
 # Set WANDB_API_KEY as environment variable
 export WANDB_API_KEY="${WANDB_API_KEY}"
@@ -193,9 +145,9 @@ wandb login ${WANDB_API_KEY}
 echo "✓ W&B configured"
 
 # ==========================================
-# 9. Make Your Script Executable
+# 8. Make Your Script Executable
 # ==========================================
-echo "Step 9: Setting up your training script..."
+echo "Step 8: Setting up your training script..."
 cd /workspace
 
 if [ -f "${REPO_NAME}/scripts/run_grpo_LoRA_length.sh" ]; then
@@ -217,11 +169,12 @@ echo "=========================================="
 echo "Environment: verl"
 echo "VERL location: /workspace/verl"
 echo "Your repo location: /workspace/${REPO_NAME}"
-echo "Dataset location: ${DATA_DIR}"
 echo ""
 echo "To run your training script:"
 echo "  cd /workspace"
-echo "  ./${REPO_NAME}/scripts/run_grpo_LoRA_length"
+echo "  ./${REPO_NAME}/scripts/run_grpo_LoRA_length.sh"
+echo ""
+echo "Note: The training script will automatically generate the dataset if needed."
 echo ""
 echo "⚠ Note: To activate the environment in your current shell, run:"
 echo "  source ~/.bashrc"

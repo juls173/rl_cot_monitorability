@@ -5,13 +5,26 @@ set -x
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # export VLLM_USE_V1=0
 
+# Dataset configuration
+DATASET="bigmath"  # Options: "gsm8k" or "bigmath"
 NUM_BUDGET_COPIES=1
 BUDGET_VALUES="50 500"
-BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 BUDGET_WINDOW=25
-PENALTY_WARMUP=250000
 FORMAT_ONLY_ANSWER=false
 DECREASING_BUDGETS=false
+BIGMATH_EXTRA_ARGS=""  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
+DATA_BASE_DIR="/workspace/data"
+REPO_DIR="/workspace/rl_cot_monitorability"
+
+# Training configuration
+PENALTY_WARMUP=250000
+LR=5e-4
+LORA_RANK=32
+LORA_ALPHA=64
+EPOCHS=1
+
+# Build path components (must match generate_dataset.sh logic)
+BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then
     FORMAT_STRING="_format"
 else
@@ -22,18 +35,22 @@ if [ "${DECREASING_BUDGETS}" = true ]; then
 else
     DECREASING_STRING=""
 fi
-LR=5e-4
-LORA_RANK=32
-LORA_ALPHA=64
-EPOCHS=1
-# DATA_DIR=/workspace/data/gsm8k_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}
-DATA_DIR=/workspace/data/bigmath_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}
-REWARD_FN_PATH=/workspace/rl_cot_monitorability/scripts/reward_length.py
+DATA_DIR="${DATA_BASE_DIR}/${DATASET}_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}"
+
+# Generate dataset if it doesn't exist
+if [ ! -f "${DATA_DIR}/train.parquet" ] || [ ! -f "${DATA_DIR}/test.parquet" ]; then
+    echo "Dataset not found at ${DATA_DIR}, generating..."
+    GENERATE_CMD="${REPO_DIR}/scripts/generate_dataset.sh --dataset ${DATASET} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values \"${BUDGET_VALUES}\" --budget-window ${BUDGET_WINDOW} --data-base-dir ${DATA_BASE_DIR} --repo-dir ${REPO_DIR}"
+    if [ "${FORMAT_ONLY_ANSWER}" = true ]; then GENERATE_CMD="${GENERATE_CMD} --format-only-answer"; fi
+    if [ "${DECREASING_BUDGETS}" = true ]; then GENERATE_CMD="${GENERATE_CMD} --decreasing-budgets"; fi
+    if [ -n "${BIGMATH_EXTRA_ARGS}" ]; then GENERATE_CMD="${GENERATE_CMD} --bigmath-extra-args \"${BIGMATH_EXTRA_ARGS}\""; fi
+    eval ${GENERATE_CMD}
+fi
+REWARD_FN_PATH=${REPO_DIR}/scripts/reward_length.py
 REWARD_FN_NAME=compute_score
 # ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
-# PROJECT=verl_gsm8k_length
-PROJECT=verl_bigmath_length
+PROJECT=verl_${DATASET}_length
 EXP="25_11_24_r1qwen7b_grpo_budget_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}_warmup${PENALTY_WARMUP}_lr${LR}_alpha${LORA_ALPHA}${FORMAT_STRING}"
 
 
