@@ -5,6 +5,7 @@ Preprocess the Big-Math-RL-Verified dataset to parquet format with token budgets
 import argparse
 import os
 import random
+from typing import Optional, Union
 
 import datasets
 
@@ -13,6 +14,76 @@ INSTRUCTION_FOLLOWING = "Think step by step and output the final answer using \\
 INSTRUCTION_FOLLOWING_FORMAT_ONLY = "Think step by step and output ONLY the final answer using \\boxed{}. Do not provide any other explanation."
 TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process as close as possible to the thinking budget.'
 TOKEN_BUDGET_WINDOW_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +/- {window} tokens of the budget.'
+
+
+def get_curriculum_budget(
+    position: float,
+    budget_values: list,
+    budget_range: bool,
+    curriculum_warmup: Optional[float],
+    curriculum_cooldown: Optional[float],
+) -> Union[int, str]:
+    """
+    Get budget for a given position in curriculum mode.
+    
+    Args:
+        position: Position in dataset (0.0 to 1.0)
+        budget_values: Budget values (2 for range, 4 for range+curriculum, or discrete list)
+        budget_range: If True, budget_values defines a range
+        curriculum_warmup: Fraction of dataset using initial budget
+        curriculum_cooldown: Fraction of dataset using final budget
+    
+    Returns:
+        Budget value (int) or 'control'
+    """
+    warmup = curriculum_warmup if curriculum_warmup is not None else 0.0
+    cooldown = curriculum_cooldown if curriculum_cooldown is not None else 0.0
+    
+    if budget_range:
+        # budget_values = [init_lo, init_hi, final_lo, final_hi]
+        init_lo, init_hi, final_lo, final_hi = budget_values
+        
+        if position < warmup:
+            return random.randint(init_lo, init_hi)
+        elif position >= 1.0 - cooldown:
+            return random.randint(final_lo, final_hi)
+        else:
+            # Linear interpolation
+            middle_length = 1.0 - warmup - cooldown
+            progress = (position - warmup) / middle_length if middle_length > 0 else 0.5
+            lo = round(init_lo + progress * (final_lo - init_lo))
+            hi = round(init_hi + progress * (final_hi - init_hi))
+            return random.randint(min(lo, hi), max(lo, hi))
+    else:
+        # Discrete values - sort descending for curriculum
+        numeric_values = sorted([v for v in budget_values if v != 'control'], reverse=True)
+        n_values = len(numeric_values)
+        
+        if n_values == 0:
+            return 'control'
+        
+        if warmup == 0.0 and cooldown == 0.0:
+            # Default: distribute all values evenly
+            idx = int(position * n_values)
+            idx = min(idx, n_values - 1)
+            return numeric_values[idx]
+        
+        if position < warmup:
+            return numeric_values[0]  # Highest
+        elif position >= 1.0 - cooldown:
+            return numeric_values[-1]  # Lowest
+        else:
+            # Middle section uses remaining values (excluding first and last)
+            if n_values <= 2:
+                mid = warmup + (1.0 - warmup - cooldown) / 2
+                return numeric_values[0] if position < mid else numeric_values[-1]
+            
+            middle_values = numeric_values[1:-1]
+            middle_length = 1.0 - warmup - cooldown
+            progress = (position - warmup) / middle_length if middle_length > 0 else 0.5
+            idx = int(progress * len(middle_values))
+            idx = min(idx, len(middle_values) - 1)
+            return middle_values[idx]
 
 
 def is_numerical(answer: str) -> bool:
@@ -46,79 +117,113 @@ def make_base_map_fn(split):
     return process_fn
 
 
-def expand_with_budgets(dataset, num_copies, budget_values, data_source, format_only_answer=False, budget_window=0, decreasing_budgets=False):
+def expand_with_budgets(
+    dataset,
+    num_copies: int,
+    budget_values: list,
+    data_source: str,
+    format_only_answer: bool = False,
+    budget_window: int = 0,
+    decreasing_budgets: bool = False,
+    budget_range: bool = False,
+    curriculum_warmup: Optional[float] = None,
+    curriculum_cooldown: Optional[float] = None,
+):
     """Create multiple copies of each example with different token budgets.
     
-    If decreasing_budgets is True, examples are sorted by budget (descending) after creation.
+    Args:
+        dataset: Input dataset
+        num_copies: Number of copies per example
+        budget_values: Budget values (discrete list, or range endpoints)
+        data_source: Data source identifier
+        format_only_answer: Use format-only instruction
+        budget_window: Window around budget for penalty-free zone
+        decreasing_budgets: Use curriculum (budgets decrease over training)
+        budget_range: Interpret budget_values as range (2 values) or interpolated range (4 values with curriculum)
+        curriculum_warmup: Fraction of dataset for initial budget (curriculum mode only)
+        curriculum_cooldown: Fraction of dataset for final budget (curriculum mode only)
     """
     expanded = []
-    
     instruction = INSTRUCTION_FOLLOWING_FORMAT_ONLY if format_only_answer else INSTRUCTION_FOLLOWING
     
-    for example in dataset:
-        budgets = random.sample(budget_values, num_copies)
-        
-        for copy_idx, budget in enumerate(budgets):
-            # Handle control condition (no budget constraint)
-            if budget == 'control':
-                question = example["problem"] + "\n\n" + instruction
+    def make_example(example, budget, copy_idx):
+        """Helper to create a single expanded example."""
+        if budget == 'control':
+            question = example["problem"] + "\n\n" + instruction
+        else:
+            if budget_window > 0:
+                budget_str = TOKEN_BUDGET_WINDOW_STR.format(budget=budget, window=budget_window)
             else:
-                # Use window-aware prompt if budget_window > 0
-                if budget_window > 0:
-                    budget_str = TOKEN_BUDGET_WINDOW_STR.format(budget=budget, window=budget_window)
-                else:
-                    budget_str = TOKEN_BUDGET_STR.format(budget=budget)
-                question = (
-                    example["problem"] + "\n\n" + 
-                    budget_str + " " + 
-                    instruction
-                )
-            
-            data = {
-                "data_source": data_source,
-                "prompt": [{
-                    "role": "user",
-                    "content": question,
-                }],
-                "ability": "math",
-                "reward_model": {"style": "rule", "ground_truth": example["answer"]},
-                "extra_info": {
-                    "split": example["split"],
-                    "index": example["index"],
-                    "question": example["problem"],
-                    "answer": example["answer"],
-                    "source": example["source"],
-                    "domain": example["domain"],
-                    "llama8b_solve_rate": example["llama8b_solve_rate"],
-                    "budget": budget,
-                    "budget_window": budget_window,
-                    "copy_idx": copy_idx,
-                    "format_only_answer": format_only_answer,
-                },
-            }
-            expanded.append(data)
+                budget_str = TOKEN_BUDGET_STR.format(budget=budget)
+            question = example["problem"] + "\n\n" + budget_str + " " + instruction
+        
+        return {
+            "data_source": data_source,
+            "prompt": [{"role": "user", "content": question}],
+            "ability": "math",
+            "reward_model": {"style": "rule", "ground_truth": example["answer"]},
+            "extra_info": {
+                "split": example["split"],
+                "index": example["index"],
+                "question": example["problem"],
+                "answer": example["answer"],
+                "source": example["source"],
+                "domain": example["domain"],
+                "llama8b_solve_rate": example["llama8b_solve_rate"],
+                "budget": budget,
+                "budget_window": budget_window,
+                "copy_idx": copy_idx,
+                "format_only_answer": format_only_answer,
+            },
+        }
     
-    # Sort by budget descending if requested (treat 'control' as infinity so it comes first)
     if decreasing_budgets:
-        expanded.sort(key=lambda x: float('inf') if x["extra_info"]["budget"] == 'control' else x["extra_info"]["budget"], reverse=True)
+        # Curriculum mode: assign budgets based on position
+        total_examples = len(dataset) * num_copies
+        global_idx = 0
+        
+        for example in dataset:
+            for copy_idx in range(num_copies):
+                position = global_idx / total_examples if total_examples > 0 else 0
+                budget = get_curriculum_budget(
+                    position, budget_values, budget_range,
+                    curriculum_warmup, curriculum_cooldown
+                )
+                expanded.append(make_example(example, budget, copy_idx))
+                global_idx += 1
+    else:
+        # Random sampling mode
+        for example in dataset:
+            if budget_range:
+                # Sample from continuous range [min, max]
+                budgets = [random.randint(budget_values[0], budget_values[1]) for _ in range(num_copies)]
+            else:
+                # Sample from discrete values (without replacement)
+                budgets = random.sample(budget_values, num_copies)
+            
+            for copy_idx, budget in enumerate(budgets):
+                expanded.append(make_example(example, budget, copy_idx))
     
     return datasets.Dataset.from_list(expanded)
 
 
 def bigmath_token_budget(
-    local_save_dir,
-    num_budget_copies,
-    budget_values,
-    sources=None,
-    max_samples=None,
-    solve_rate_min=0.0,
-    solve_rate_max=1.0,
-    train_fraction=0.8,
-    numerical_only=False,
-    format_only_answer=False,
-    budget_window=0,
-    decreasing_budgets=False,
-    seed=42
+    local_save_dir: str,
+    num_budget_copies: int,
+    budget_values: list,
+    sources: Optional[list] = None,
+    max_samples: Optional[int] = None,
+    solve_rate_min: float = 0.0,
+    solve_rate_max: float = 1.0,
+    train_fraction: float = 0.8,
+    numerical_only: bool = False,
+    format_only_answer: bool = False,
+    budget_window: int = 0,
+    decreasing_budgets: bool = False,
+    budget_range: bool = False,
+    curriculum_warmup: Optional[float] = None,
+    curriculum_cooldown: Optional[float] = None,
+    seed: int = 42
 ):
     """
     Process Big-Math-RL-Verified dataset with token budgets.
@@ -136,6 +241,9 @@ def bigmath_token_budget(
         format_only_answer: If True, instruct model to output only boxed answer with no explanation
         budget_window: Window around budget where no penalty is applied (default 0)
         decreasing_budgets: If True, order examples by budget (descending) instead of random sampling
+        budget_range: If True, interpret budget_values as range endpoints
+        curriculum_warmup: Fraction of dataset using initial budget (curriculum mode)
+        curriculum_cooldown: Fraction of dataset using final budget (curriculum mode)
         seed: Random seed for reproducibility
     """
     random.seed(seed)
@@ -179,8 +287,16 @@ def bigmath_token_budget(
     test_dataset = test_dataset.map(lambda x: {"split": "test"})
     
     # Expand with different budgets
-    train_dataset = expand_with_budgets(train_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window, decreasing_budgets)
-    test_dataset = expand_with_budgets(test_dataset, num_budget_copies, budget_values, data_source, format_only_answer, budget_window, decreasing_budgets)
+    train_dataset = expand_with_budgets(
+        train_dataset, num_budget_copies, budget_values, data_source,
+        format_only_answer, budget_window, decreasing_budgets,
+        budget_range, curriculum_warmup, curriculum_cooldown
+    )
+    test_dataset = expand_with_budgets(
+        test_dataset, num_budget_copies, budget_values, data_source,
+        format_only_answer, budget_window, decreasing_budgets,
+        budget_range, curriculum_warmup, curriculum_cooldown
+    )
     
     # Save to parquet
     os.makedirs(local_save_dir, exist_ok=True)
@@ -267,6 +383,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Sort examples by budget (descending) for curriculum-style training"
     )
+    parser.add_argument(
+        "--budget-range",
+        action="store_true",
+        help="Interpret budget values as a range (2 values) or interpolated range (4 values with curriculum)"
+    )
+    parser.add_argument(
+        "--curriculum-warmup",
+        type=float,
+        default=None,
+        help="Fraction of dataset using initial budget (curriculum mode only)"
+    )
+    parser.add_argument(
+        "--curriculum-cooldown",
+        type=float,
+        default=None,
+        help="Fraction of dataset using final budget (curriculum mode only)"
+    )
     
     args = parser.parse_args()
     
@@ -278,14 +411,32 @@ if __name__ == "__main__":
         else:
             budget_values.append(int(val))
     
-    if args.num_budget_copies > len(budget_values):
-        raise ValueError(
-            f"num_budget_copies ({args.num_budget_copies}) cannot exceed the number of "
-            f"available budget values ({len(budget_values)})"
-        )
+    # Validation
+    if args.budget_range:
+        if args.decreasing_budgets:
+            if len(budget_values) != 4:
+                raise ValueError(
+                    "--budget-range with --decreasing-budgets requires exactly 4 values: "
+                    "init_lo, init_hi, final_lo, final_hi"
+                )
+        else:
+            if len(budget_values) != 2:
+                raise ValueError("--budget-range requires exactly 2 values: min, max")
+    else:
+        if args.num_budget_copies > len(budget_values):
+            raise ValueError(
+                f"num_budget_copies ({args.num_budget_copies}) cannot exceed the number of "
+                f"available budget values ({len(budget_values)})"
+            )
+        if args.decreasing_budgets and len(budget_values) < 2:
+            raise ValueError("--decreasing-budgets requires at least 2 budget values")
     
-    if args.decreasing_budgets and len(budget_values) < 2:
-        raise ValueError("--decreasing-budgets requires at least 2 budget values")
+    if (args.curriculum_warmup is not None or args.curriculum_cooldown is not None) and not args.decreasing_budgets:
+        raise ValueError("--curriculum-warmup and --curriculum-cooldown require --decreasing-budgets")
+    
+    if args.curriculum_warmup is not None and args.curriculum_cooldown is not None:
+        if args.curriculum_warmup + args.curriculum_cooldown > 1.0:
+            raise ValueError("curriculum_warmup + curriculum_cooldown cannot exceed 1.0")
     
     bigmath_token_budget(
         local_save_dir=args.local_save_dir,
@@ -300,6 +451,9 @@ if __name__ == "__main__":
         format_only_answer=args.format_only_answer,
         budget_window=args.budget_window,
         decreasing_budgets=args.decreasing_budgets,
+        budget_range=args.budget_range,
+        curriculum_warmup=args.curriculum_warmup,
+        curriculum_cooldown=args.curriculum_cooldown,
         seed=args.seed
     )
 

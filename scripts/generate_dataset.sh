@@ -16,6 +16,9 @@ usage() {
     echo "Optional arguments:"
     echo "  --format-only-answer   Enable format-only answer instruction"
     echo "  --decreasing-budgets   Sort examples by budget (descending) for curriculum training"
+    echo "  --budget-range         Interpret budget values as range (2 values) or interpolated range (4 values with curriculum)"
+    echo "  --curriculum-warmup    Fraction of dataset using initial budget (curriculum mode only)"
+    echo "  --curriculum-cooldown  Fraction of dataset using final budget (curriculum mode only)"
     echo "  --bigmath-extra-args   Extra arguments for bigmath_token_budget.py"
     echo "  --data-base-dir        Base directory for data (default: /workspace/data)"
     echo "  --repo-dir             Repository directory (default: /workspace/rl_cot_monitorability)"
@@ -29,6 +32,9 @@ BUDGET_VALUES=""
 BUDGET_WINDOW=""
 FORMAT_ONLY_ANSWER=false
 DECREASING_BUDGETS=false
+BUDGET_RANGE=false
+CURRICULUM_WARMUP=""
+CURRICULUM_COOLDOWN=""
 BIGMATH_EXTRA_ARGS=""
 DATA_BASE_DIR="/workspace/data"
 REPO_DIR="/workspace/rl_cot_monitorability"
@@ -59,6 +65,18 @@ while [[ $# -gt 0 ]]; do
         --decreasing-budgets)
             DECREASING_BUDGETS=true
             shift
+            ;;
+        --budget-range)
+            BUDGET_RANGE=true
+            shift
+            ;;
+        --curriculum-warmup)
+            CURRICULUM_WARMUP="$2"
+            shift 2
+            ;;
+        --curriculum-cooldown)
+            CURRICULUM_COOLDOWN="$2"
+            shift 2
             ;;
         --bigmath-extra-args)
             BIGMATH_EXTRA_ARGS="$2"
@@ -97,12 +115,20 @@ fi
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
 FORMAT_STRING=""
 DECREASING_STRING=""
+RANGE_STRING=""
+CURRICULUM_STRING=""
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then FORMAT_STRING="_format"; fi
 if [ "${DECREASING_BUDGETS}" = true ]; then DECREASING_STRING="_dec"; fi
+if [ "${BUDGET_RANGE}" = true ]; then RANGE_STRING="_range"; fi
+if [ -n "${CURRICULUM_WARMUP}" ] || [ -n "${CURRICULUM_COOLDOWN}" ]; then
+    WARMUP_VAL="${CURRICULUM_WARMUP:-0}"
+    COOLDOWN_VAL="${CURRICULUM_COOLDOWN:-0}"
+    CURRICULUM_STRING="_cur${WARMUP_VAL}_${COOLDOWN_VAL}"
+fi
 
 # Construct data directory path
 mkdir -p "${DATA_BASE_DIR}"
-DATA_DIR="${DATA_BASE_DIR}/${DATASET}_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}"
+DATA_DIR="${DATA_BASE_DIR}/${DATASET}_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}${RANGE_STRING}${CURRICULUM_STRING}"
 
 # Check if dataset already exists
 if [ -f "${DATA_DIR}/train.parquet" ] && [ -f "${DATA_DIR}/test.parquet" ]; then
@@ -126,6 +152,9 @@ fi
 CMD="python ${SCRIPT} --local-save-dir ${DATA_DIR} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values ${BUDGET_VALUES} --budget-window ${BUDGET_WINDOW} ${EXTRA_ARGS}"
 if [ "${FORMAT_ONLY_ANSWER}" = true ]; then CMD="${CMD} --format-only-answer"; fi
 if [ "${DECREASING_BUDGETS}" = true ]; then CMD="${CMD} --decreasing-budgets"; fi
+if [ "${BUDGET_RANGE}" = true ]; then CMD="${CMD} --budget-range"; fi
+if [ -n "${CURRICULUM_WARMUP}" ]; then CMD="${CMD} --curriculum-warmup ${CURRICULUM_WARMUP}"; fi
+if [ -n "${CURRICULUM_COOLDOWN}" ]; then CMD="${CMD} --curriculum-cooldown ${CURRICULUM_COOLDOWN}"; fi
 
 eval ${CMD}
 

@@ -12,7 +12,10 @@ BUDGET_VALUES="50 100 200 300 400 500"
 BUDGET_WINDOW=50
 FORMAT_ONLY_ANSWER=false
 DECREASING_BUDGETS=true
-BIGMATH_EXTRA_ARGS="--numerical-only --min-solve-rate 0.1 --max-solve-rate 0.9 --max-samples 31250 --train-fraction 0.96"  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
+BUDGET_RANGE=false  # If true, interpret budget values as range (2 values) or interpolated range (4 values with curriculum)
+CURRICULUM_WARMUP=""  # Fraction of dataset using initial budget (curriculum mode only), e.g., "0.2"
+CURRICULUM_COOLDOWN=""  # Fraction of dataset using final budget (curriculum mode only), e.g., "0.2"
+BIGMATH_EXTRA_ARGS="--numerical-only --solve-rate-min 0.1 --solve-rate-max 0.9 --max-samples 31250 --train-fraction 0.96"  # Extra arguments for bigmath_token_budget.py (e.g., "--numerical-only --max-samples 10000")
 DATA_BASE_DIR="/workspace/data"
 REPO_DIR="/workspace/rl_cot_monitorability"
 
@@ -35,7 +38,19 @@ if [ "${DECREASING_BUDGETS}" = true ]; then
 else
     DECREASING_STRING=""
 fi
-DATA_DIR="${DATA_BASE_DIR}/${DATASET}_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}"
+if [ "${BUDGET_RANGE}" = true ]; then
+    RANGE_STRING="_range"
+else
+    RANGE_STRING=""
+fi
+if [ -n "${CURRICULUM_WARMUP}" ] || [ -n "${CURRICULUM_COOLDOWN}" ]; then
+    WARMUP_VAL="${CURRICULUM_WARMUP:-0}"
+    COOLDOWN_VAL="${CURRICULUM_COOLDOWN:-0}"
+    CURRICULUM_STRING="_cur${WARMUP_VAL}_${COOLDOWN_VAL}"
+else
+    CURRICULUM_STRING=""
+fi
+DATA_DIR="${DATA_BASE_DIR}/${DATASET}_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}${RANGE_STRING}${CURRICULUM_STRING}"
 
 # Generate dataset if it doesn't exist
 if [ ! -f "${DATA_DIR}/train.parquet" ] || [ ! -f "${DATA_DIR}/test.parquet" ]; then
@@ -43,6 +58,9 @@ if [ ! -f "${DATA_DIR}/train.parquet" ] || [ ! -f "${DATA_DIR}/test.parquet" ]; 
     GENERATE_CMD="${REPO_DIR}/scripts/generate_dataset.sh --dataset ${DATASET} --num-budget-copies ${NUM_BUDGET_COPIES} --budget-values \"${BUDGET_VALUES}\" --budget-window ${BUDGET_WINDOW} --data-base-dir ${DATA_BASE_DIR} --repo-dir ${REPO_DIR}"
     if [ "${FORMAT_ONLY_ANSWER}" = true ]; then GENERATE_CMD="${GENERATE_CMD} --format-only-answer"; fi
     if [ "${DECREASING_BUDGETS}" = true ]; then GENERATE_CMD="${GENERATE_CMD} --decreasing-budgets"; fi
+    if [ "${BUDGET_RANGE}" = true ]; then GENERATE_CMD="${GENERATE_CMD} --budget-range"; fi
+    if [ -n "${CURRICULUM_WARMUP}" ]; then GENERATE_CMD="${GENERATE_CMD} --curriculum-warmup ${CURRICULUM_WARMUP}"; fi
+    if [ -n "${CURRICULUM_COOLDOWN}" ]; then GENERATE_CMD="${GENERATE_CMD} --curriculum-cooldown ${CURRICULUM_COOLDOWN}"; fi
     if [ -n "${BIGMATH_EXTRA_ARGS}" ]; then GENERATE_CMD="${GENERATE_CMD} --bigmath-extra-args \"${BIGMATH_EXTRA_ARGS}\""; fi
     eval ${GENERATE_CMD}
 fi
