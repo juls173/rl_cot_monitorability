@@ -16,6 +16,16 @@ TOKEN_BUDGET_STR = 'You have a token budget of around {budget} tokens. You must 
 TOKEN_BUDGET_WINDOW_STR = 'You have a token budget of around {budget} tokens. You must finish your thinking process within +/- {window} tokens of the budget.'
 
 
+def random_multiple_of_10(lo: int, hi: int) -> int:
+    """Sample a random multiple of 10 within [lo, hi]."""
+    lo_rounded = ((lo + 9) // 10) * 10  # Round up to nearest 10
+    hi_rounded = (hi // 10) * 10  # Round down to nearest 10
+    if lo_rounded > hi_rounded:
+        # Range too small, just return midpoint rounded to 10
+        return round((lo + hi) / 2 / 10) * 10
+    return random.randint(lo_rounded // 10, hi_rounded // 10) * 10
+
+
 def get_curriculum_budget(
     position: float,
     budget_values: list,
@@ -44,16 +54,16 @@ def get_curriculum_budget(
         init_lo, init_hi, final_lo, final_hi = budget_values
         
         if position < warmup:
-            return random.randint(init_lo, init_hi)
+            return random_multiple_of_10(init_lo, init_hi)
         elif position >= 1.0 - cooldown:
-            return random.randint(final_lo, final_hi)
+            return random_multiple_of_10(final_lo, final_hi)
         else:
             # Linear interpolation
             middle_length = 1.0 - warmup - cooldown
             progress = (position - warmup) / middle_length if middle_length > 0 else 0.5
             lo = round(init_lo + progress * (final_lo - init_lo))
             hi = round(init_hi + progress * (final_hi - init_hi))
-            return random.randint(min(lo, hi), max(lo, hi))
+            return random_multiple_of_10(min(lo, hi), max(lo, hi))
     else:
         # Discrete values - sort descending for curriculum
         numeric_values = sorted([v for v in budget_values if v != 'control'], reverse=True)
@@ -128,6 +138,7 @@ def expand_with_budgets(
     budget_range: bool = False,
     curriculum_warmup: Optional[float] = None,
     curriculum_cooldown: Optional[float] = None,
+    is_validation: bool = False,
 ):
     """Create multiple copies of each example with different token budgets.
     
@@ -142,6 +153,7 @@ def expand_with_budgets(
         budget_range: Interpret budget_values as range (2 values) or interpolated range (4 values with curriculum)
         curriculum_warmup: Fraction of dataset for initial budget (curriculum mode only)
         curriculum_cooldown: Fraction of dataset for final budget (curriculum mode only)
+        is_validation: If True and curriculum is used, use only final budget values
     """
     expanded = []
     instruction = INSTRUCTION_FOLLOWING_FORMAT_ONLY if format_only_answer else INSTRUCTION_FOLLOWING
@@ -179,24 +191,38 @@ def expand_with_budgets(
     
     if decreasing_budgets:
         # Curriculum mode: assign budgets based on position
-        total_examples = len(dataset) * num_copies
-        global_idx = 0
-        
-        for example in dataset:
-            for copy_idx in range(num_copies):
-                position = global_idx / total_examples if total_examples > 0 else 0
-                budget = get_curriculum_budget(
-                    position, budget_values, budget_range,
-                    curriculum_warmup, curriculum_cooldown
-                )
-                expanded.append(make_example(example, budget, copy_idx))
-                global_idx += 1
+        # For validation, use only final budget values
+        if is_validation:
+            for example in dataset:
+                for copy_idx in range(num_copies):
+                    if budget_range:
+                        # Use final range [final_lo, final_hi]
+                        final_lo, final_hi = budget_values[2], budget_values[3]
+                        budget = random_multiple_of_10(final_lo, final_hi)
+                    else:
+                        # Use lowest (final) budget value
+                        numeric_values = sorted([v for v in budget_values if v != 'control'])
+                        budget = numeric_values[0] if numeric_values else 'control'
+                    expanded.append(make_example(example, budget, copy_idx))
+        else:
+            total_examples = len(dataset) * num_copies
+            global_idx = 0
+            
+            for example in dataset:
+                for copy_idx in range(num_copies):
+                    position = global_idx / total_examples if total_examples > 0 else 0
+                    budget = get_curriculum_budget(
+                        position, budget_values, budget_range,
+                        curriculum_warmup, curriculum_cooldown
+                    )
+                    expanded.append(make_example(example, budget, copy_idx))
+                    global_idx += 1
     else:
         # Random sampling mode
         for example in dataset:
             if budget_range:
-                # Sample from continuous range [min, max]
-                budgets = [random.randint(budget_values[0], budget_values[1]) for _ in range(num_copies)]
+                # Sample from continuous range [min, max] (multiples of 10)
+                budgets = [random_multiple_of_10(budget_values[0], budget_values[1]) for _ in range(num_copies)]
             else:
                 # Sample from discrete values (without replacement)
                 budgets = random.sample(budget_values, num_copies)
@@ -290,12 +316,14 @@ def bigmath_token_budget(
     train_dataset = expand_with_budgets(
         train_dataset, num_budget_copies, budget_values, data_source,
         format_only_answer, budget_window, decreasing_budgets,
-        budget_range, curriculum_warmup, curriculum_cooldown
+        budget_range, curriculum_warmup, curriculum_cooldown,
+        is_validation=False
     )
     test_dataset = expand_with_budgets(
         test_dataset, num_budget_copies, budget_values, data_source,
         format_only_answer, budget_window, decreasing_budgets,
-        budget_range, curriculum_warmup, curriculum_cooldown
+        budget_range, curriculum_warmup, curriculum_cooldown,
+        is_validation=True
     )
     
     # Save to parquet

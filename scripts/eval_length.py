@@ -3,6 +3,7 @@ import json
 from typing import Optional
 import pandas as pd
 import numpy as np
+from scipy import stats
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from peft import PeftModelForCausalLM
@@ -12,8 +13,12 @@ from tqdm import tqdm
 from reward_length import compute_reward_breakdown
 
 
-def load_gsm8k_parquet(path: str) -> pd.DataFrame:
-    """Load GSM8K parquet file and extract relevant fields."""
+def load_dataset_parquet(path: str) -> pd.DataFrame:
+    """Load dataset parquet file and extract relevant fields.
+    
+    Works with both GSM8K and BigMath datasets created by gsm8k_token_budget.py
+    and bigmath_token_budget.py.
+    """
     df = pd.read_parquet(path)
     
     # Extract fields from nested structure
@@ -68,7 +73,7 @@ def count_forbidden_word_in_thinking(text: str, forbidden_word: str) -> int:
     return search_text.lower().count(forbidden_word.lower())
 
 
-def eval_gsm8k_length(
+def eval_length(
     model: str,
     data: str,
     out: str,
@@ -84,7 +89,9 @@ def eval_gsm8k_length(
     format_penalty: Optional[float] = None,
     forbidden_word: Optional[str] = None,
 ):
-    """Run evaluation on GSM8K with length constraints.
+    """Run evaluation on math datasets with length constraints.
+    
+    Works with both GSM8K and BigMath datasets.
     
     If lora_path is provided, model should be the base model and lora_path
     should point to the LoRA adapter directory.
@@ -96,7 +103,7 @@ def eval_gsm8k_length(
     otherwise it is loaded from environment variables.
     """
     # Load data
-    df = load_gsm8k_parquet(data)
+    df = load_dataset_parquet(data)
     if limit:
         df = df.head(limit)
     
@@ -241,17 +248,17 @@ def eval_gsm8k_length(
             "budget": budget,
             "budget_window": budget_window,
             "ground_truth": ground_truth,
-            "format_only_answer": df.iloc[i]["format_only_answer"],
+            "format_only_answer": bool(df.iloc[i]["format_only_answer"]),
             "prompt": formatted_prompt,
             "generated_text": generated_text,
             "predicted_answer": metrics["extracted_answer"],
-            "token_count": metrics["token_count"],
-            "length_diff": metrics["length_diff"],
-            "correctness_reward": metrics["correctness_reward"],
-            "length_penalty": metrics["length_penalty"],
-            "format_penalty": metrics["format_penalty"],
-            "total_reward": metrics["total_reward"],
-            "is_correct": is_correct,
+            "token_count": int(metrics["token_count"]) if metrics["token_count"] is not None else None,
+            "length_diff": int(metrics["length_diff"]) if metrics["length_diff"] is not None else None,
+            "correctness_reward": float(metrics["correctness_reward"]),
+            "length_penalty": float(metrics["length_penalty"]),
+            "format_penalty": float(metrics["format_penalty"]),
+            "total_reward": float(metrics["total_reward"]),
+            "is_correct": bool(is_correct),
             "forbidden_word": forbidden_word,
             "forbidden_word_count": forbidden_word_count,
             "has_forbidden_word_violation": has_forbidden_word_violation,
@@ -409,11 +416,11 @@ def eval_gsm8k_length(
     
     # Compute correlation between budget and accuracy (excluding control samples)
     non_control_df = results_df[results_df['budget'] != 'control']
-    if len(non_control_df) > 1:
-        budgets = non_control_df['budget'].values
+    if len(non_control_df) > 2:
+        budgets = non_control_df['budget'].values.astype(float)
         accuracies = non_control_df['is_correct'].astype(int).values
-        correlation = np.corrcoef(budgets, accuracies)[0, 1]
-        print(f"Correlation between budget and accuracy (excluding control): {correlation:.4f}")
+        correlation, p_value = stats.pearsonr(budgets, accuracies)
+        print(f"Correlation between budget and accuracy (excluding control): r={correlation:.4f}, p={p_value:.4f}")
     else:
         print("Not enough non-control samples to compute correlation")
     print()
@@ -426,7 +433,7 @@ def eval_gsm8k_length(
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, help="Path to base model (or full model if not using LoRA)")
-    ap.add_argument("--data", required=True, help="Path to parquet dataset")
+    ap.add_argument("--data", required=True, help="Path to parquet dataset (GSM8K or BigMath)")
     ap.add_argument("--out", required=True, help="Output JSONL file")
     ap.add_argument("--lora-path", default=None, help="Path to LoRA adapter directory (optional)")
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -445,7 +452,7 @@ if __name__ == "__main__":
     
     args = ap.parse_args()
     
-    eval_gsm8k_length(
+    eval_length(
         model=args.model,
         data=args.data,
         out=args.out,
