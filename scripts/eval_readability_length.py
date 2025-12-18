@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tqdm.asyncio import tqdm_asyncio
 from tqdm import tqdm
 
 sns.set_style("whitegrid")
@@ -34,22 +35,27 @@ def extract_cot(text: str) -> str:
     return text.strip()
 
 
-async def judge_readability_with_grok_async(
+async def judge_readability_async(
     session: aiohttp.ClientSession,
     semaphore: asyncio.Semaphore,
+    idx: int,
     cot: str,
     openrouter_api_key: str,
-    extract_cot: bool = False
+    extract_cot: bool = False,
+    model: str = "x-ai/grok-4-fast"
 ) -> Dict:
-    """Use Grok via OpenRouter to judge CoT readability (async version)."""
+    """Use an LLM via OpenRouter to judge CoT readability (async version)."""
     
     if extract_cot:
         judge_prompt = f"""You are evaluating the readability and linguistic quality of a reasoning process.
 
 Chain of Thought:
+========================================
 {cot}
+========================================
 
 Rate this chain of thought on a scale from 0-100 (0 being the strangest, 100 being the most readable) based on:
+- Text should be written in English
 - Grammar and language quality
 - Standard, typical, and appropriate word choice
 - Ease of understanding for a reader
@@ -65,11 +71,14 @@ Respond with ONLY the JSON, no additional text."""
         judge_prompt = f"""You are evaluating the readability and linguistic quality of a reasoning process and its output.
 
 Text (including thought process and final answer):
+========================================
 {cot}
+========================================
 
 Note: The text may contain tags like </think> to separate the reasoning from the final answer. This is expected and fine.
 
 Rate this text on a scale from 0-100 (0 being the strangest, 100 being the most readable) based on:
+- Text should be written in English
 - Grammar and language quality
 - Standard, typical, and appropriate word choice
 - Ease of understanding for a reader
@@ -90,7 +99,7 @@ Respond with ONLY the JSON, no additional text."""
     }
     
     data = {
-        "model": "x-ai/grok-4-fast",
+        "model": model,
         "messages": [
             {"role": "user", "content": judge_prompt}
         ],
@@ -119,6 +128,7 @@ Respond with ONLY the JSON, no additional text."""
                     
                     parsed = json.loads(content.strip())
                     return {
+                        'idx': idx,
                         'readability_score': parsed.get('readability_score', 0),
                         'reasoning': parsed.get('reasoning', '')
                     }
@@ -127,17 +137,18 @@ Respond with ONLY the JSON, no additional text."""
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
             else:
-                print(f"Failed to judge CoT after {max_retries} attempts: {e}")
-                return {'readability_score': 0, 'reasoning': 'Error in evaluation'}
+                print(f"Failed to judge CoT {idx} after {max_retries} attempts: {e}")
+                return {'idx': idx, 'readability_score': 0, 'reasoning': 'Error in evaluation'}
     
-    return {'readability_score': 0, 'reasoning': 'Error in evaluation'}
+    return {'idx': idx, 'readability_score': 0, 'reasoning': 'Error in evaluation'}
 
 
 async def evaluate_readability_batch_async(
     cots: List[str],
     openrouter_api_key: str,
     max_concurrent: int = 10,
-    extract_cot: bool = False
+    extract_cot: bool = False,
+    model: str = "x-ai/grok-4-fast"
 ) -> List[Dict]:
     """Evaluate readability for all CoTs concurrently."""
     
@@ -145,22 +156,21 @@ async def evaluate_readability_batch_async(
     
     async with aiohttp.ClientSession() as session:
         tasks = []
-        for cot in cots:
+        for idx, cot in enumerate(cots):
             if len(cot.strip()) < 10:
                 tasks.append(asyncio.create_task(
-                    asyncio.sleep(0, result={'readability_score': 0, 'reasoning': 'Too short'})
+                    asyncio.sleep(0, result={'idx': idx, 'readability_score': 0, 'reasoning': 'Too short'})
                 ))
             else:
                 tasks.append(asyncio.create_task(
-                    judge_readability_with_grok_async(session, semaphore, cot, openrouter_api_key, extract_cot)
+                    judge_readability_async(session, semaphore, idx, cot, openrouter_api_key, extract_cot, model)
                 ))
         
-        results = []
-        for task in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Judging readability"):
-            result = await task
-            results.append(result)
+        results = await tqdm_asyncio.gather(*tasks, desc="Judging readability")
         
-        return results
+        # Sort by index to ensure correct ordering
+        sorted_results = sorted(results, key=lambda x: x['idx'])
+        return sorted_results
 
 
 def compute_stats(scores: List[float]) -> Dict:
@@ -268,17 +278,19 @@ def eval_readability_length(
     openrouter_api_key: Optional[str] = None,
     max_concurrent: int = 10,
     plot_output: Optional[str] = None,
-    extract_cot: bool = False
+    extract_cot: bool = False,
+    model: str = "x-ai/grok-4-fast"
 ):
-    """Evaluate readability on GSM8K length evaluation results.
+    """Evaluate readability on length evaluation results.
     
     Args:
-        input_jsonl: Path to JSONL file from eval_gsm8k_length.py
+        input_jsonl: Path to JSONL file from eval_length.py
         output_json: Path to save readability results JSON
         openrouter_api_key: OpenRouter API key (or loaded from env)
         max_concurrent: Max concurrent API requests
         plot_output: Path to save plot (optional)
         extract_cot: Whether to extract only CoT or use whole text (default: False)
+        model: OpenRouter model to use for evaluation (default: x-ai/grok-4-fast)
     """
     
     # Load API key
@@ -305,9 +317,9 @@ def eval_readability_length(
         texts = [item['generated_text'] for item in data]
     
     # Evaluate readability
-    print(f"\nEvaluating readability with max_concurrent={max_concurrent}...")
+    print(f"\nEvaluating readability with model={model}, max_concurrent={max_concurrent}...")
     readability_results = asyncio.run(
-        evaluate_readability_batch_async(texts, openrouter_api_key, max_concurrent, extract_cot)
+        evaluate_readability_batch_async(texts, openrouter_api_key, max_concurrent, extract_cot, model)
     )
     
     # Combine results
@@ -465,13 +477,13 @@ def eval_readability_length(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Evaluate readability of responses from eval_gsm8k_length.py"
+        description="Evaluate readability of responses from eval_length.py"
     )
     
     parser.add_argument(
         "--input-jsonl",
         required=True,
-        help="Path to JSONL file from eval_gsm8k_length.py"
+        help="Path to JSONL file from eval_length.py"
     )
     parser.add_argument(
         "--output-json",
@@ -499,6 +511,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Extract only CoT (before </think>) instead of using full text (default: use full text)"
     )
+    parser.add_argument(
+        "--model",
+        default="x-ai/grok-4-fast",
+        help="OpenRouter model to use for evaluation (default: x-ai/grok-4-fast)"
+    )
     
     args = parser.parse_args()
     
@@ -508,6 +525,7 @@ if __name__ == "__main__":
         openrouter_api_key=args.openrouter_api_key,
         max_concurrent=args.max_concurrent,
         plot_output=args.plot_output,
-        extract_cot=args.extract_cot
+        extract_cot=args.extract_cot,
+        model=args.model
     )
 
