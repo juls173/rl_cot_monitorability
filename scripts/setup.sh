@@ -18,34 +18,30 @@ wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O
 bash miniconda.sh -b -p /workspace/miniconda
 rm miniconda.sh
 
-# Source conda
-source /workspace/miniconda/etc/profile.d/conda.sh
-export PATH="/workspace/miniconda/bin:$PATH"
+# Initialize conda for this script session
+eval "$(/workspace/miniconda/bin/conda shell.bash hook)"
 
 # Accept conda ToS for default channels
-/workspace/miniconda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
-/workspace/miniconda/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
 # Configure conda
-/workspace/miniconda/bin/conda config --system --prepend channels conda-forge
-/workspace/miniconda/bin/conda config --system --set auto_update_conda false
+conda config --system --prepend channels conda-forge
+conda config --system --set auto_update_conda false
 
 echo "✓ Conda installed successfully"
 
 # ==========================================
-# 2. Create Virtual Environment
+# 2. Create and Activate Virtual Environment
 # ==========================================
 echo "Step 2: Creating conda environment..."
-/workspace/miniconda/bin/conda create -n verl python=3.10 -y
+conda create -n verl python=3.10 -y
 
-# Initialize conda for bash
-/workspace/miniconda/bin/conda init bash
-
-# Source the bash profile to load conda functions
-source ~/.bashrc
-
-# Activate the environment
 conda activate verl
+
+# Verify activation
+echo "Active environment: $CONDA_DEFAULT_ENV"
+echo "Python location: $(which python)"
 
 echo "✓ Virtual environment 'verl' created and activated"
 
@@ -65,26 +61,29 @@ fi
 echo "✓ VERL repository ready"
 
 # ==========================================
-# 4. Install VERL Dependencies
+# 4. Install Base Dependencies First
 # ==========================================
-echo "Step 4: Installing VERL dependencies (this may take a while)..."
+echo "Step 4: Installing base dependencies..."
+
+# Install essential packages first
+pip install --upgrade pip setuptools wheel
+pip install datasets huggingface_hub wandb
+
+echo "✓ Base dependencies installed"
+
+# ==========================================
+# 5. Install VERL Dependencies
+# ==========================================
+echo "Step 5: Installing VERL dependencies (this may take a while)..."
 cd /workspace/verl
 USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
 
 echo "✓ VERL dependencies installed"
 
 # ==========================================
-# 5. Install Additional Required Packages
+# 6. Install VERL in Editable Mode
 # ==========================================
-echo "Step 5: Installing additional required packages..."
-pip install datasets huggingface_hub
-
-echo "✓ Additional packages installed"
-
-# ==========================================
-# 6. Install VERL in Editable Mode (no deps first)
-# ==========================================
-echo "Step 6: Installing VERL in editable mode (no deps)..."
+echo "Step 6: Installing VERL in editable mode..."
 cd /workspace/verl
 pip install --no-deps -e .
 
@@ -104,7 +103,7 @@ else
     git clone ${REPO_URL}
 fi
 
-echo "✓ code repository cloned"
+echo "✓ Code repository cloned"
 
 # ==========================================
 # 8. Download GSM8K Dataset
@@ -113,24 +112,20 @@ echo "Step 8: Downloading GSM8K dataset..."
 cd /workspace/verl/examples/data_preprocess
 
 # Create data directory if it doesn't exist
-mkdir -p ~/../workspace/data/gsm8k
+mkdir -p /workspace/data/gsm8k
 
 # Run the preprocessing script
-python3 gsm8k.py --local_save_dir ~/../workspace/data/gsm8k
+python3 gsm8k.py --local_save_dir /workspace/data/gsm8k
 
-echo "✓ GSM8K dataset downloaded to ~/data/gsm8k"
+echo "✓ GSM8K dataset downloaded to /workspace/data/gsm8k"
 
 # ==========================================
 # 9. Configure W&B Login
 # ==========================================
 echo "Step 9: Configuring Weights & Biases..."
 
-# Set WANDB_API_KEY as environment variable
-export WANDB_API_KEY="${WANDB_API_KEY}"
-echo "export WANDB_API_KEY=${WANDB_API_KEY}" >> ~/.bashrc
-
-# Login to wandb (only if API key is provided)
 if [ -n "${WANDB_API_KEY}" ]; then
+    export WANDB_API_KEY="${WANDB_API_KEY}"
     wandb login ${WANDB_API_KEY}
     echo "✓ W&B configured"
 else
@@ -143,12 +138,33 @@ fi
 echo "Step 10: Setting up your training script..."
 cd /workspace
 
-if [ -f "${REPO_NAME}/scripts/run_grpo_LoRA" ]; then
+if [ -f "${REPO_NAME}/scripts/run_grpo_LoRA.sh" ]; then
     chmod +x ${REPO_NAME}/scripts/run_grpo_LoRA.sh
-    echo "✓ run_grpo_LoRA script is now executable"
+    echo "✓ run_grpo_LoRA.sh script is now executable"
 else
-    echo "⚠ Warning: run_grpo_LoRA script not found in ${REPO_NAME}/"
+    echo "⚠ Warning: run_grpo_LoRA.sh script not found in ${REPO_NAME}/scripts/"
 fi
+
+# ==========================================
+# 11. Setup Shell Configuration for Future Sessions
+# ==========================================
+echo "Step 11: Configuring shell for future sessions..."
+
+# Add conda initialization to bashrc
+cat >> ~/.bashrc << 'EOF'
+
+# >>> conda initialize >>>
+eval "$(/workspace/miniconda/bin/conda shell.bash hook)"
+conda activate verl
+# <<< conda initialize <<<
+EOF
+
+# Add WANDB_API_KEY if provided
+if [ -n "${WANDB_API_KEY}" ]; then
+    echo "export WANDB_API_KEY=${WANDB_API_KEY}" >> ~/.bashrc
+fi
+
+echo "✓ Shell configuration updated"
 
 # ==========================================
 # Final Setup
@@ -162,11 +178,11 @@ echo "=========================================="
 echo "Environment: verl"
 echo "VERL location: /workspace/verl"
 echo "Your repo location: /workspace/${REPO_NAME}"
-echo "Dataset location: ~/data/gsm8k"
+echo "Dataset location: /workspace/data/gsm8k"
 echo ""
 echo "To run your training script:"
-echo "  cd /workspace"
-echo "  ./${REPO_NAME}/run_grpo_LoRA"
+echo "  cd /workspace/${REPO_NAME}/scripts"
+echo "  ./run_grpo_LoRA.sh"
 echo ""
-echo "Environment is already activated!"
+echo "For new terminal sessions, conda will auto-activate 'verl'"
 echo "=========================================="
