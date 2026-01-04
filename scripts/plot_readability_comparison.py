@@ -7,7 +7,6 @@ from typing import List, Dict, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-plt.rcParams['figure.figsize'] = (14, 6)
 plt.rcParams['font.size'] = 12
 
 
@@ -18,8 +17,8 @@ def load_readability_results(json_path: str) -> Dict:
 
 
 def extract_step_number(dirname: str) -> int:
-    """Extract step number from directory name like 'step100'."""
-    match = re.match(r'step(\d+)', dirname)
+    """Extract step number from directory name like 'step100' or 'step_100."""
+    match = re.match(r'step_?(\d+)', dirname)
     if match:
         return int(match.group(1))
     raise ValueError(f"Could not extract step number from '{dirname}'")
@@ -39,7 +38,7 @@ def collect_model_data(model_dir: str) -> List[Tuple[int, Dict]]:
         if not entry.startswith('step'):
             continue
         
-        json_path = os.path.join(step_path, 'eval_readability_temp1.json')
+        json_path = os.path.join(step_path, 'eval_readability.json')
         if not os.path.exists(json_path):
             continue
         
@@ -81,7 +80,8 @@ def extract_metrics(data: Dict) -> Tuple[float, float, float]:
 def plot_readability_comparison(
     model_dirs: List[str],
     labels: List[str],
-    output_path: str
+    output_path: str,
+    title: str = 'Readability and Accuracy Over Training'
 ):
     """Plot readability comparison across models over training steps.
     
@@ -89,6 +89,7 @@ def plot_readability_comparison(
         model_dirs: List of paths to model directories
         labels: List of labels for each model
         output_path: Path to save the output plot
+        title: Title for the plot
     """
     # Collect data for all models
     all_model_data = []
@@ -100,7 +101,7 @@ def plot_readability_comparison(
     distinct_colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#a65628', '#f781bf', '#999999']
     colors = [distinct_colors[i % len(distinct_colors)] for i in range(len(labels))]
     
-    fig, ax = plt.subplots(figsize=(12, 7))
+    fig, ax = plt.subplots(figsize=(8, 5))
     ax_acc = ax.twinx()
     
     # Track all values for dynamic y-axis
@@ -126,19 +127,21 @@ def plot_readability_comparison(
         color = colors[i]
         # Readability lines (solid for correct, dashed for incorrect)
         ax.plot(steps, readability_correct, 'o-', color=color, label=f'{label} (correct)', linewidth=2)
-        ax.plot(steps, readability_incorrect, 's--', color=color, label=f'{label} (incorrect)', linewidth=2, alpha=0.7)
+        ax.plot(steps, readability_incorrect, 's--', color=color, label=f'{label} (incorrect)', linewidth=2, alpha=0.7, markerfacecolor='none')
         # Accuracy line (dotted)
         ax_acc.plot(steps, accuracies, '^:', color=color, label=f'{label} (accuracy)', linewidth=2, alpha=0.5)
     
     ax.set_xlabel('Training Step', fontsize=14, fontweight='bold')
     ax.set_ylabel('Mean Readability Score', fontsize=14, fontweight='bold')
     ax_acc.set_ylabel('Accuracy (%)', fontsize=14, fontweight='bold', color='gray')
-    ax.set_title('Readability and Accuracy Over Training', fontsize=16, fontweight='bold', pad=20)
+    ax_acc.tick_params(axis='y', colors='gray')
+    ax.set_title(title, fontsize=16, fontweight='bold', pad=20)
     
     # Combine legends from both axes
     lines1, labels1 = ax.get_legend_handles_labels()
     lines2, labels2 = ax_acc.get_legend_handles_labels()
-    ax.legend(lines1 + lines2, labels1 + labels2, loc='best', fontsize=10)
+    # ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left', bbox_to_anchor=(1.15, 1), fontsize=10)
+    ax.legend(lines1 + lines2, labels1 + labels2, loc='lower right', fontsize=10)
     
     ax.grid(True, alpha=0.3)
     
@@ -182,6 +185,11 @@ if __name__ == "__main__":
         required=True,
         help="Path to save the output plot"
     )
+    parser.add_argument(
+        "--title",
+        default='Readability and Accuracy Over Training',
+        help="Title for the plot (default: 'Readability and Accuracy Over Training')"
+    )
     
     args = parser.parse_args()
     
@@ -191,6 +199,7 @@ if __name__ == "__main__":
     plot_readability_comparison(
         model_dirs=args.model_dirs,
         labels=args.labels,
-        output_path=args.output
+        output_path=args.output,
+        title=args.title
     )
 

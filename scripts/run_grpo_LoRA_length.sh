@@ -27,6 +27,7 @@ LORA_RANK=32
 LORA_ALPHA=64
 TEMPERATURE=1
 EPOCHS=1
+ENTROPY_COEFF=0.005
 
 # Build path components (must match generate_dataset.sh logic)
 BUDGET_VALUES_FORMATTED=$(echo ${BUDGET_VALUES} | tr ' ' '_')
@@ -71,7 +72,7 @@ REWARD_FN_NAME=compute_score
 ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 # ACTOR=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 PROJECT=verl_${DATASET}_length
-EXP="25_12_08_r1qwen15b_grpo_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}${RANGE_STRING}${CURRICULUM_STRING}_warmup${PENALTY_WARMUP}_lr${LR}_alpha${LORA_ALPHA}_temp${TEMPERATURE}"
+EXP="25_12_19_r1qwen15b_grpo_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${BUDGET_WINDOW}${FORMAT_STRING}${DECREASING_STRING}${RANGE_STRING}${CURRICULUM_STRING}_warmup${PENALTY_WARMUP}_lr${LR}_alpha${LORA_ALPHA}_temp${TEMPERATURE}_entropy${ENTROPY_COEFF}"
 
 
 # # 1x H100 80GB for 1.5B model
@@ -95,10 +96,17 @@ EXP="25_12_08_r1qwen15b_grpo_${NUM_BUDGET_COPIES}_${BUDGET_VALUES_FORMATTED}_w${
 # LOG_PROB_MICRO_BATCH_SIZE=32
 # N_GPUS=2
 
-# 1x H200 140GB for 1.5B model
+# # 1x H200 140GB for 1.5B model w/o entropy
+# TRAIN_BATCH_SIZE=256
+# PPO_MINI_BATCH_SIZE=128
+# PPO_MICRO_BATCH_SIZE=64
+# LOG_PROB_MICRO_BATCH_SIZE=64
+# N_GPUS=1
+
+# 1x H200 140GB for 1.5B model w/ entropy
 TRAIN_BATCH_SIZE=256
-PPO_MINI_BATCH_SIZE=128
-PPO_MICRO_BATCH_SIZE=64
+PPO_MINI_BATCH_SIZE=64
+PPO_MICRO_BATCH_SIZE=32
 LOG_PROB_MICRO_BATCH_SIZE=64
 N_GPUS=1
 
@@ -156,6 +164,9 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.actor.fsdp_config.param_offload=False \
   actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+  actor_rollout_ref.actor.entropy_coeff=${ENTROPY_COEFF} \
+  actor_rollout_ref.ref.entropy_from_logits_with_chunking=True \
+  actor_rollout_ref.actor.entropy_checkpointing=True \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1\
   actor_rollout_ref.rollout.temperature=${TEMPERATURE} \
@@ -169,8 +180,6 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.ref.fsdp_config.param_offload=False \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOG_PROB_MICRO_BATCH_SIZE} \
   actor_rollout_ref.ref.strategy=fsdp2 \
-  actor_rollout_ref.ref.entropy_from_logits_with_chunking=True \
-  actor_rollout_ref.actor.entropy_checkpointing=True \
   custom_reward_function.path=${REWARD_FN_PATH} \
   custom_reward_function.name=${REWARD_FN_NAME} \
   trainer.critic_warmup=0 \
